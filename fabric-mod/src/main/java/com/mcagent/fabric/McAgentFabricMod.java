@@ -72,6 +72,7 @@ public class McAgentFabricMod implements ClientModInitializer {
 
         try {
             springContext = new AnnotationConfigApplicationContext();
+            springContext.getEnvironment().setActiveProfiles("dev");
             springContext.register(CoreApplication.class);
             springContext.register(FabricModConfig.class);
             springContext.refresh();
