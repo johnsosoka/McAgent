@@ -37,6 +37,11 @@ public class FabricChatHandler {
             .toArray(String[]::new);
 
     public void onChatMessage(String message) {
+        // Ignore system/broadcast messages (including our own /say output)
+        if (message.startsWith("[")) {
+            return;
+        }
+
         String playerName = extractPlayerName(message);
         String command = extractCommand(message);
 

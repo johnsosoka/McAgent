@@ -7,10 +7,14 @@ import org.slf4j.LoggerFactory;
 /**
  * Thread-safe utility for sending chat messages from the Minecraft client.
  * All sends are scheduled on the main client thread to avoid data races.
+ * Rate-limited to prevent server spam kicks.
  */
 public final class FabricChatSender {
     private static final Logger LOGGER = LoggerFactory.getLogger("mc_agent");
     private static final int MAX_MESSAGE_LENGTH = 250;
+    private static final long MIN_INTERVAL_MS = 3000; // max 1 msg per 3s
+
+    private static long lastSendTime = 0;
 
     private FabricChatSender() {
         // utility class
@@ -18,11 +22,21 @@ public final class FabricChatSender {
 
     /**
      * Send a message to Minecraft chat as the bot, safely from any thread.
+     * Rate-limited: messages sent faster than 1 per 3 seconds are dropped.
      */
     public static void send(String message) {
         if (message == null || message.isBlank()) {
             return;
         }
+
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastSendTime;
+        if (elapsed < MIN_INTERVAL_MS) {
+            LOGGER.debug("Chat send rate-limited ({} ms since last)", elapsed);
+            return;
+        }
+        lastSendTime = now;
+
         String truncated = message.length() > MAX_MESSAGE_LENGTH
                 ? message.substring(0, MAX_MESSAGE_LENGTH) + "..."
                 : message;

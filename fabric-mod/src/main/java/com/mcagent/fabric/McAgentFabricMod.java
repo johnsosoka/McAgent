@@ -84,11 +84,10 @@ public class McAgentFabricMod implements ClientModInitializer {
             baritoneBridge = (FabricBaritoneBridge) botOps;
 
             // Wire Baritone progress callbacks:
-            // 1. <framework> tagged messages go to LLM memory (game state context)
-            // 2. Plain text goes to in-game chat (player visibility)
+            // Progress/status messages go to LLM memory as <framework> context only.
+            // They are NOT sent to public chat — that would be spammy.
             botOps.setProgressCallback(msg -> {
                 langChainService.addFrameworkContext(msg);
-                FabricChatSender.send(msg);
             });
 
             // Wire ChatService so the LLM's sendMessage tool actually posts to chat
