@@ -1,6 +1,5 @@
 package com.mcagent.fabric;
 
-import com.mcagent.core.model.BotResponse;
 import com.mcagent.core.service.LangChain4jService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,10 +57,12 @@ public class FabricChatHandler {
         executor.submit(() -> {
             try {
                 log.info("Processing command from {}: {}", playerName, command);
-                BotResponse response = langChainService.processInput(command, playerName);
+                // LangChain4j automatically invokes tools (navigateTo, sendMessage, etc.)
+                // during this call. The returned String is the LLM's conversational reply.
+                String response = langChainService.processInput(command, playerName);
 
-                if (response != null && response.getMessage() != null) {
-                    FabricChatSender.send(response.getMessage());
+                if (response != null && !response.isBlank()) {
+                    FabricChatSender.send(response);
                 }
             } catch (Exception e) {
                 log.error("Error processing chat command", e);

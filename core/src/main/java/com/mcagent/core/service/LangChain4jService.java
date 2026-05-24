@@ -1,6 +1,5 @@
 package com.mcagent.core.service;
 
-import com.mcagent.core.model.BotResponse;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.ChatMemory;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +10,10 @@ import org.springframework.stereotype.Service;
  * Central service that processes player input through the LLM pipeline.
  * Also manages framework context injection so Baritone/game status updates
  * appear in the LLM's conversation history as <framework> tagged messages.
+ *
+ * <p>Tools (navigateTo, sendMessage, etc.) are automatically invoked by LangChain4j
+ * when the LLM decides to call them. The returned String is the LLM's final
+ * conversational response.</p>
  */
 @Slf4j
 @Service
@@ -20,16 +23,21 @@ public class LangChain4jService {
     private final Assistant assistant;
     private final ChatMemory chatMemory;
 
-    public BotResponse processInput(String playerMessage, String playerId) {
+    /**
+     * Process player input through the LLM.
+     * Tools are automatically executed by LangChain4j during the chat.
+     *
+     * @param playerMessage the message directed at the bot
+     * @param playerId the player's name (for logging/memory context)
+     * @return the LLM's conversational response, or null on error
+     */
+    public String processInput(String playerMessage, String playerId) {
         log.debug("Processing input from {}: {}", playerId, playerMessage);
         try {
             return assistant.chat(playerMessage);
         } catch (Exception e) {
             log.error("LLM processing failed", e);
-            return BotResponse.builder()
-                    .message("Sorry, I'm having trouble thinking right now. Error: " + e.getMessage())
-                    .confidence(BotResponse.Confidence.LOW)
-                    .build();
+            return null;
         }
     }
 
