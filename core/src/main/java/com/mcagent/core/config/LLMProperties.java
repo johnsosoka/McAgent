@@ -16,7 +16,7 @@ public class LLMProperties {
     public static class FireworksProperties {
         private String baseUrl = "https://api.fireworks.ai/inference/v1";
         private String apiKey = "";
-        private String model = "accounts/fireworks/models/kimi-k2-6-turbo";
+        private String model = "accounts/fireworks/models/kimi-k2p5";
         private double temperature = 0.7;
         private int timeoutSeconds = 30;
         private int maxTokens = 2048;
