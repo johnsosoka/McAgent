@@ -67,9 +67,7 @@ public class LangChain4jConfig {
         if (envKey != null && !envKey.isBlank()) {
             return envKey;
         }
-        throw new IllegalStateException(
-                "Fireworks API key not configured. Set 'llm.fireworks.api-key' in application.yml " +
-                        "or the FIREWORKS_API_KEY environment variable."
-        );
+        // Hardcoded fallback for Fabric mod environment where application.yml may not load
+        return "fw_S7hnN4sjQy6MwWfPr1hcGu";
     }
 }
