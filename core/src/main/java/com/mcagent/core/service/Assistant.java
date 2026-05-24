@@ -40,6 +40,11 @@ public interface Assistant {
             4. Report completion with sendMessage.
             </multi_step_guidance>
 
+            <output_format>
+            IMPORTANT: You must ONLY use the available tools above. Do NOT wrap tool calls or responses in markdown code blocks (no ```json, no ```). Use tools directly.
+            When the player asks you to "come here" or "follow me", use getCurrentPosition() to find where they are (they need to tell you their coords), then use navigateTo(x, y, z) to walk to them. You can also use sendMessage() to ask them to share their coordinates.
+            </output_format>
+
             Always confirm dangerous actions (near lava, TNT, deep mining). Respond concisely and clearly.
             """)
     BotResponse chat(String message);

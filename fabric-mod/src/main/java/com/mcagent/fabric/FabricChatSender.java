@@ -23,6 +23,7 @@ public final class FabricChatSender {
     /**
      * Send a message to Minecraft chat as the bot, safely from any thread.
      * Rate-limited: messages sent faster than 1 per 3 seconds are dropped.
+     * Illegal characters are stripped to prevent disconnects.
      */
     public static void send(String message) {
         if (message == null || message.isBlank()) {
@@ -37,18 +38,37 @@ public final class FabricChatSender {
         }
         lastSendTime = now;
 
-        String truncated = message.length() > MAX_MESSAGE_LENGTH
-                ? message.substring(0, MAX_MESSAGE_LENGTH) + "..."
-                : message;
+        String sanitized = sanitize(message);
+        if (sanitized.isBlank()) {
+            return;
+        }
 
         Minecraft client = Minecraft.getInstance();
-        client.execute(() -> sendOnClientThread(client, truncated));
+        client.execute(() -> sendOnClientThread(client, sanitized));
+    }
+
+    /**
+     * Strip characters that are illegal in Minecraft chat/commands:
+     * newlines, backticks, control chars, and other problematic symbols.
+     */
+    private static String sanitize(String message) {
+        return message
+                .replace('\n', ' ')
+                .replace('\r', ' ')
+                .replace('\t', ' ')
+                .replace('`', '\'')
+                .replaceAll("[^\\x20-\\x7E]", "") // keep only printable ASCII
+                .trim();
     }
 
     private static void sendOnClientThread(Minecraft client, String message) {
         if (client.player == null || client.player.connection == null) {
             LOGGER.warn("Cannot send chat message: not connected");
             return;
+        }
+
+        if (message.length() > MAX_MESSAGE_LENGTH) {
+            message = message.substring(0, MAX_MESSAGE_LENGTH) + "...";
         }
 
         if (message.startsWith("/")) {

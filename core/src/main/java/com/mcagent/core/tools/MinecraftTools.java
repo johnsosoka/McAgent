@@ -32,6 +32,16 @@ public class MinecraftTools {
     private final PlayerNoteService playerNoteService;
     private final ChatService chatService;
 
+    @Tool("Follow a specific player by name. The bot will path to and continue following them.")
+    public String followPlayer(
+            @P("The player's name to follow") String playerName) {
+        log.info("Tool: followPlayer({})", playerName);
+        var result = bot.followPlayer(playerName);
+        return result.isSuccess()
+                ? "Following player " + playerName
+                : "Cannot follow: " + result.getMessage();
+    }
+
     @Tool("Navigate to specific X Y Z coordinates")
     public String navigateTo(
             @P("X coordinate") int x,

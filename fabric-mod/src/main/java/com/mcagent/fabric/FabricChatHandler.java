@@ -65,7 +65,7 @@ public class FabricChatHandler {
                 }
             } catch (Exception e) {
                 log.error("Error processing chat command", e);
-                FabricChatSender.send("Sorry, something went wrong: " + e.getMessage());
+                FabricChatSender.send("Sorry, something went wrong. Check the logs.");
             }
         });
     }
