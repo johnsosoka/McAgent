@@ -72,12 +72,11 @@ public final class FabricChatSender {
         }
 
         if (message.startsWith("/")) {
-            // User explicitly wants a command — strip leading slash and send raw
+            // Actual command — strip leading slash
             client.player.connection.sendCommand(message.substring(1));
         } else {
-            // Use /say command to bypass chat-signing chain (1.19+)
-            // /say broadcasts to all players without breaking cryptographic chat chain
-            client.player.connection.sendCommand("say " + message);
+            // Normal chat — use signed chat path (properly handles 1.19+ chat signing)
+            client.player.connection.sendChat(message);
         }
     }
 }
