@@ -36,8 +36,6 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
         ChatService.class,
         SafetyValidator.class,
         MinecraftTools.class,
-        LocationRepository.class,
-        PlayerNoteRepository.class,
         LocationMemoryService.class,
         PlayerNoteService.class,
         VectorMemoryService.class
