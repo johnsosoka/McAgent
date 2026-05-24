@@ -35,8 +35,8 @@ dependencies {
     annotationProcessor 'org.ow2.asm:asm:9.7'
     annotationProcessor 'org.ow2.asm:asm-tree:9.7'
 
-    // Baritone API (compile-only — runtime provided by standalone Baritone mod)
-    compileOnly name: 'baritone-api-fabric-1.17.0'
+    // Baritone (compile-only — provided by baritone-unoptimized-fabric mod at runtime)
+    compileOnly name: 'baritone-unoptimized-fabric-1.17.0'
 
     // Core module
     implementation project(':core')
