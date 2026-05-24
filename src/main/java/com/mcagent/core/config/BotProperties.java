@@ -1,0 +1,30 @@
+package com.mcagent.core.config;
+
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
+
+@Data
+@Configuration
+@ConfigurationProperties(prefix = "bot")
+public class BotProperties {
+    private String name = "McAgent";
+    private List<String> triggerWords = List.of("bot", "agent");
+    private ChatProperties chat = new ChatProperties();
+    private SafetyProperties safety = new SafetyProperties();
+
+    @Data
+    public static class ChatProperties {
+        private int maxHistory = 20;
+        private int responseTimeoutSeconds = 30;
+    }
+
+    @Data
+    public static class SafetyProperties {
+        private boolean requireConfirmationForDangerous = true;
+        private List<String> dangerousBlocks = List.of("TNT", "LAVA");
+        private int maxMiningDepth = 16;
+    }
+}
