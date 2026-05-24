@@ -15,12 +15,12 @@ import baritone.api.utils.BlockOptionalMetaLookup;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
 import lombok.extern.slf4j.Slf4j;
-import net.minecraft.block.Block;
-import net.minecraft.block.Blocks;
-import net.minecraft.entity.Entity;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Identifier;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.core.BlockPos;
 
 import java.util.Map;
 import java.util.function.Consumer;
@@ -242,9 +242,9 @@ public class FabricBaritoneBridge implements BotOperations {
         try {
             Identifier id = Identifier.tryParse(blockType.toLowerCase());
             if (id == null) {
-                id = Identifier.of("minecraft", blockType.toLowerCase());
+                id = Identifier.fromNamespaceAndPath("minecraft", blockType.toLowerCase());
             }
-            return Registries.BLOCK.get(id);
+            return BuiltInRegistries.BLOCK.get(id).map(ref -> ref.value()).orElse(null);
         } catch (Exception e) {
             log.warn("Could not resolve block: {}", blockType);
             return null;

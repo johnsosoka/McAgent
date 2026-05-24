@@ -5,9 +5,8 @@ import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -23,18 +22,45 @@ public class McAgentFabricMod implements ClientModInitializer {
     private AnnotationConfigApplicationContext springContext;
     private FabricChatHandler chatHandler;
     private FabricBaritoneBridge baritoneBridge;
+    private ClientPacketListener lastConnection;
 
     @Override
     public void onInitializeClient() {
         LOGGER.info("McAgent Fabric mod initializing...");
 
-        ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
-            initSpringContext();
-        });
+        // Register Mixin-based event hooks
+        ModEventHooks.setChatMessageCallback(this::onChatMessage);
+        ModEventHooks.setTickCallback(this::onClientTick);
+    }
 
-        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+    private void onChatMessage(net.minecraft.network.chat.Component message) {
+        if (chatHandler != null) {
+            chatHandler.onChatMessage(message.getString());
+        }
+    }
+
+    private void onClientTick() {
+        var mc = Minecraft.getInstance();
+        if (mc == null) return;
+
+        ClientPacketListener current = mc.getConnection();
+
+        // Detect server join
+        if (current != null && lastConnection == null) {
+            initSpringContext();
+        }
+
+        // Detect server disconnect
+        if (current == null && lastConnection != null) {
             shutdownSpringContext();
-        });
+        }
+
+        lastConnection = current;
+
+        // Baritone tick callback
+        if (baritoneBridge != null) {
+            baritoneBridge.onClientTick();
+        }
     }
 
     private void initSpringContext() {
@@ -69,8 +95,6 @@ public class McAgentFabricMod implements ClientModInitializer {
 
             chatHandler = new FabricChatHandler(langChainService);
 
-            registerEventHandlers();
-
             LOGGER.info("McAgent initialized successfully. Beans: {}",
                     springContext.getBeanDefinitionCount());
         } catch (Exception e) {
@@ -89,21 +113,5 @@ public class McAgentFabricMod implements ClientModInitializer {
         }
         baritoneBridge = null;
         LOGGER.info("McAgent Spring context shut down.");
-    }
-
-    private void registerEventHandlers() {
-        // Chat message received
-        ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-            if (!overlay && chatHandler != null) {
-                chatHandler.onChatMessage(message.getString());
-            }
-        });
-
-        // Client tick for Baritone state polling
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (baritoneBridge != null) {
-                baritoneBridge.onClientTick();
-            }
-        });
     }
 }

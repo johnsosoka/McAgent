@@ -1,6 +1,6 @@
 package com.mcagent.fabric;
 
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,20 +27,20 @@ public final class FabricChatSender {
                 ? message.substring(0, MAX_MESSAGE_LENGTH) + "..."
                 : message;
 
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         client.execute(() -> sendOnClientThread(client, truncated));
     }
 
-    private static void sendOnClientThread(MinecraftClient client, String message) {
-        if (client.player == null || client.player.networkHandler == null) {
+    private static void sendOnClientThread(Minecraft client, String message) {
+        if (client.player == null || client.player.connection == null) {
             LOGGER.warn("Cannot send chat message: not connected");
             return;
         }
 
         if (message.startsWith("/")) {
-            client.player.networkHandler.sendCommand(message.substring(1));
+            client.player.connection.sendCommand(message.substring(1));
         } else {
-            client.player.networkHandler.sendChatMessage(message);
+            client.player.connection.sendChat(message);
         }
     }
 }

@@ -14,9 +14,11 @@
       "com.mcagent.fabric.McAgentFabricMod"
     ]
   },
+  "mixins": [
+    "mc_agent.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.16.0",
-    "fabric-api": "*",
     "minecraft": ">=26.1.2",
     "java": ">=25",
     "baritone": ">=1.15.0"

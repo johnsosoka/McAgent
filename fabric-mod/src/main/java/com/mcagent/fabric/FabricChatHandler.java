@@ -4,7 +4,7 @@ import com.mcagent.core.model.BotResponse;
 import com.mcagent.core.service.LangChain4jService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.Minecraft;
 
 import java.util.Arrays;
 import java.util.Comparator;
@@ -106,7 +106,7 @@ public class FabricChatHandler {
     }
 
     private String getLocalPlayerName() {
-        var player = MinecraftClient.getInstance().player;
+        var player = Minecraft.getInstance().player;
         return player != null ? player.getName().getString() : null;
     }
 }

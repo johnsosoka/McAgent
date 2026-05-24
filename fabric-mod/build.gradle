@@ -1,5 +1,6 @@
 plugins {
-    id 'fabric-loom' version '1.10-SNAPSHOT'
+    id 'java'
+    id 'xyz.wagyourtail.unimined' version '1.4.2-SNAPSHOT'
     id 'maven-publish'
     id 'com.gradleup.shadow' version '8.3.6'
 }
@@ -15,24 +16,39 @@ repositories {
     mavenCentral()
     maven { url = 'https://jitpack.io' }
     maven { url = 'https://maven.fabricmc.net/' }
+    maven { url = 'https://files.minecraftforge.net/maven/' }
+    maven { url = 'https://maven.wagyourtail.xyz/releases' }
     flatDir {
         dirs '../.local-deps'
     }
 }
 
 dependencies {
-    // Minecraft + Fabric
-    minecraft "com.mojang:minecraft:26.1.2"
-    mappings "net.fabricmc:yarn:26.1.2+build.1:v2"
-    modImplementation "net.fabricmc:fabric-loader:0.16.14"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:0.127.0+1.21.5"
+    // Minecraft 26.1.2 remapped JAR (provided by Unimined cache)
+    compileOnly files("${gradle.gradleUserHomeDir}/caches/unimined/net/minecraft/minecraft/26.1.2/minecraft-26.1.2-fabric-merged+fixed-official.jar")
+
+    // Mixin (for our mixins)
+    compileOnly 'org.spongepowered:mixin:0.8.7'
+    annotationProcessor 'org.spongepowered:mixin:0.8.7'
+    annotationProcessor 'com.google.code.gson:gson:2.11.0'
+    annotationProcessor 'com.google.guava:guava:33.5.0-jre'
+    annotationProcessor 'org.ow2.asm:asm:9.7'
+    annotationProcessor 'org.ow2.asm:asm-tree:9.7'
 
     // Baritone API (compile-only — runtime provided by standalone Baritone mod)
-    // Place the baritone-api-fabric JAR in .local-deps/ when available
-    compileOnly name: 'baritone-api-fabric'
+    compileOnly name: 'baritone-api-fabric-1.17.0'
 
     // Core module
     implementation project(':core')
+
+    // Spring annotations needed for compile (core uses implementation scope)
+    compileOnly platform('org.springframework.boot:spring-boot-dependencies:3.4.0')
+    compileOnly 'org.springframework.boot:spring-boot-starter'
+    compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.38'
+    annotationProcessor 'org.projectlombok:lombok:1.18.38'
 
     // Shadow plugin will bundle core's transitive dependencies
 }
@@ -42,6 +58,24 @@ java {
         languageVersion = JavaLanguageVersion.of(25)
     }
     withSourcesJar()
+}
+
+unimined.minecraft {
+    version '26.1.2'
+
+    mappings {
+        mojmap()
+        devFallbackNamespace 'official'
+    }
+
+    fabric {
+        loader '0.18.6'
+    }
+}
+
+afterEvaluate {
+    configurations.compileClasspath.extendsFrom(configurations.minecraft)
+    configurations.compileClasspath.extendsFrom(configurations.minecraftLibraries)
 }
 
 jar {
@@ -87,12 +121,7 @@ shadowJar {
     relocate 'com.sun', 'com.mcagent.shaded.com.sun'
 }
 
-// Fabric Loom uses the shadow JAR as the mod artifact
-remapJar {
-    dependsOn shadowJar
-    inputFile = shadowJar.archiveFile
-}
-
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+    options.release = 25
 }
