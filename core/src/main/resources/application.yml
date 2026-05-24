@@ -18,7 +18,7 @@ llm:
   primary-provider: fireworks
   fireworks:
     base-url: "https://api.fireworks.ai/inference/v1"
-    api-key: fw_S7hnN4sjQy6MwWfPr1hcGu
+    api-key: ${FIREWORKS_API_KEY:}
     model: "accounts/fireworks/models/kimi-k2p5"
     temperature: 0.7
     timeout-seconds: 30
