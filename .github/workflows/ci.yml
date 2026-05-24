@@ -19,11 +19,14 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'maven'
+          cache: 'gradle'
 
-      - name: Build and test with Maven
-        run: mvn clean test
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build and test with Gradle
+        run: ./gradlew clean build
 
       # Optional: build mod profile (requires ForgeGradle workspace; disabled by default)
       # - name: Build mod module
-      #   run: mvn clean compile -Pmod
+      #   run: ./gradlew clean compile -Pmod
