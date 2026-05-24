@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
     id 'maven-publish'
+    id 'com.gradleup.shadow' version '8.3.6'
 }
 
 version = '0.1.0-SNAPSHOT'
@@ -23,6 +24,10 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
+            // Fix for UnionFileSystem multi-release JAR scanning crash on macOS
+            jvmArgs '-Djdk.util.jar.enableMultiRelease=false'
+            // API key for LLM service — read from environment or .env file
+            environment 'FIREWORKS_API_KEY', System.getenv('FIREWORKS_API_KEY') ?: ''
             mods {
                 mc_agent {
                     source sourceSets.main
@@ -108,7 +113,57 @@ jar {
     }
 }
 
-jar.finalizedBy('reobfJar')
+shadowJar {
+    archiveClassifier.set('all')
+    zip64 = true
+    // Preserve mods.toml and manifest
+    mergeServiceFiles()
+    manifest {
+        inheritFrom jar.manifest
+    }
+
+    // Exclude Forge-provided and Minecraft classes from shading
+    exclude 'net/minecraftforge/**'
+    exclude 'net/minecraft/**'
+    exclude 'cpw/mods/**'
+    exclude 'org/slf4j/**'
+    exclude 'org/apache/logging/**'
+
+    // Relocate shaded dependencies to avoid classloader conflicts with other mods
+    relocate 'org.springframework', 'com.mcagent.shaded.org.springframework'
+    relocate 'dev.langchain4j', 'com.mcagent.shaded.dev.langchain4j'
+    relocate 'com.fasterxml.jackson', 'com.mcagent.shaded.com.fasterxml.jackson'
+    relocate 'com.google.gson', 'com.mcagent.shaded.com.google.gson'
+    relocate 'org.hibernate', 'com.mcagent.shaded.org.hibernate'
+    relocate 'org.yaml', 'com.mcagent.shaded.org.yaml'
+    relocate 'com.zaxxer', 'com.mcagent.shaded.com.zaxxer'
+    relocate 'org.aspectj', 'com.mcagent.shaded.org.aspectj'
+    relocate 'io.micrometer', 'com.mcagent.shaded.io.micrometer'
+    relocate 'jakarta', 'com.mcagent.shaded.jakarta'
+    relocate 'org.jboss', 'com.mcagent.shaded.org.jboss'
+    relocate 'com.google.common', 'com.mcagent.shaded.com.google.common'
+    relocate 'org.apache.httpcomponents', 'com.mcagent.shaded.org.apache.httpcomponents'
+    relocate 'io.netty', 'com.mcagent.shaded.io.netty'
+    relocate 'org.antlr', 'com.mcagent.shaded.org.antlr'
+    relocate 'org.opennlp', 'com.mcagent.shaded.org.opennlp'
+    relocate 'com.github.oshi', 'com.mcagent.shaded.com.github.oshi'
+    relocate 'com.machinezoo', 'com.mcagent.shaded.com.machinezoo'
+    relocate 'com.knuddels', 'com.mcagent.shaded.com.knuddels'
+    relocate 'com.ibm.icu', 'com.mcagent.shaded.com.ibm.icu'
+    relocate 'org.glassfish', 'com.mcagent.shaded.org.glassfish'
+    relocate 'org.eclipse', 'com.mcagent.shaded.org.eclipse'
+    relocate 'com.sun', 'com.mcagent.shaded.com.sun'
+}
+
+// Configure ForgeGradle to reobfuscate the shadow JAR
+reobf {
+    shadowJar {
+        // Use the same mappings and settings as the regular jar
+    }
+}
+
+// Shadow JAR replaces the standard jarJar distribution
+// jarJar is left enabled for any transitive mod dependencies
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
