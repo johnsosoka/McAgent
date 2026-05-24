@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "mc_agent",
+  "version": "${version}",
+  "name": "McAgent",
+  "description": "LLM-powered autonomous Minecraft agent for Fabric 26.1.2",
+  "authors": ["McAgent Team"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/mc_agent/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      "com.mcagent.fabric.McAgentFabricMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": ">=26.1.2",
+    "java": ">=25",
+    "baritone": ">=1.15.0"
+  },
+  "suggests": {
+    "modmenu": "*"
+  }
+}

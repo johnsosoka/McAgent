@@ -1,0 +1,98 @@
+plugins {
+    id 'fabric-loom' version '1.10-SNAPSHOT'
+    id 'maven-publish'
+    id 'com.gradleup.shadow' version '8.3.6'
+}
+
+version = '0.2.0-SNAPSHOT'
+group = 'com.mcagent'
+
+base {
+    archivesName = 'mc-agent-fabric'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://jitpack.io' }
+    maven { url = 'https://maven.fabricmc.net/' }
+    flatDir {
+        dirs '../.local-deps'
+    }
+}
+
+dependencies {
+    // Minecraft + Fabric
+    minecraft "com.mojang:minecraft:26.1.2"
+    mappings "net.fabricmc:yarn:26.1.2+build.1:v2"
+    modImplementation "net.fabricmc:fabric-loader:0.16.14"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:0.127.0+1.21.5"
+
+    // Baritone API (compile-only — runtime provided by standalone Baritone mod)
+    // Place the baritone-api-fabric JAR in .local-deps/ when available
+    compileOnly name: 'baritone-api-fabric'
+
+    // Core module
+    implementation project(':core')
+
+    // Shadow plugin will bundle core's transitive dependencies
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+}
+
+shadowJar {
+    archiveClassifier.set('all')
+    zip64 = true
+    mergeServiceFiles()
+
+    // Exclude Minecraft and Fabric classes from shading
+    exclude 'net/minecraft/**'
+    exclude 'net/fabricmc/**'
+    exclude 'org/slf4j/**'
+    exclude 'org/apache/logging/**'
+
+    // Relocate shaded dependencies to avoid classloader conflicts
+    relocate 'org.springframework', 'com.mcagent.shaded.org.springframework'
+    relocate 'dev.langchain4j', 'com.mcagent.shaded.dev.langchain4j'
+    relocate 'com.fasterxml.jackson', 'com.mcagent.shaded.com.fasterxml.jackson'
+    relocate 'com.google.gson', 'com.mcagent.shaded.com.google.gson'
+    relocate 'org.hibernate', 'com.mcagent.shaded.org.hibernate'
+    relocate 'org.yaml', 'com.mcagent.shaded.org.yaml'
+    relocate 'com.zaxxer', 'com.mcagent.shaded.com.zaxxer'
+    relocate 'org.aspectj', 'com.mcagent.shaded.org.aspectj'
+    relocate 'io.micrometer', 'com.mcagent.shaded.io.micrometer'
+    relocate 'jakarta', 'com.mcagent.shaded.jakarta'
+    relocate 'org.jboss', 'com.mcagent.shaded.org.jboss'
+    relocate 'com.google.common', 'com.mcagent.shaded.com.google.common'
+    relocate 'org.apache.httpcomponents', 'com.mcagent.shaded.org.apache.httpcomponents'
+    relocate 'io.netty', 'com.mcagent.shaded.io.netty'
+    relocate 'org.antlr', 'com.mcagent.shaded.org.antlr'
+    relocate 'org.opennlp', 'com.mcagent.shaded.org.opennlp'
+    relocate 'com.github.oshi', 'com.mcagent.shaded.com.github.oshi'
+    relocate 'com.machinezoo', 'com.mcagent.shaded.com.machinezoo'
+    relocate 'com.knuddels', 'com.mcagent.shaded.com.knuddels'
+    relocate 'com.ibm.icu', 'com.mcagent.shaded.com.ibm.icu'
+    relocate 'org.glassfish', 'com.mcagent.shaded.org.glassfish'
+    relocate 'org.eclipse', 'com.mcagent.shaded.org.eclipse'
+    relocate 'com.sun', 'com.mcagent.shaded.com.sun'
+}
+
+// Fabric Loom uses the shadow JAR as the mod artifact
+remapJar {
+    dependsOn shadowJar
+    inputFile = shadowJar.archiveFile
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

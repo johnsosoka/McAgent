@@ -1,0 +1,46 @@
+package com.mcagent.fabric;
+
+import net.minecraft.client.MinecraftClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Thread-safe utility for sending chat messages from the Minecraft client.
+ * All sends are scheduled on the main client thread to avoid data races.
+ */
+public final class FabricChatSender {
+    private static final Logger LOGGER = LoggerFactory.getLogger("mc_agent");
+    private static final int MAX_MESSAGE_LENGTH = 250;
+
+    private FabricChatSender() {
+        // utility class
+    }
+
+    /**
+     * Send a message to Minecraft chat as the bot, safely from any thread.
+     */
+    public static void send(String message) {
+        if (message == null || message.isBlank()) {
+            return;
+        }
+        String truncated = message.length() > MAX_MESSAGE_LENGTH
+                ? message.substring(0, MAX_MESSAGE_LENGTH) + "..."
+                : message;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        client.execute(() -> sendOnClientThread(client, truncated));
+    }
+
+    private static void sendOnClientThread(MinecraftClient client, String message) {
+        if (client.player == null || client.player.networkHandler == null) {
+            LOGGER.warn("Cannot send chat message: not connected");
+            return;
+        }
+
+        if (message.startsWith("/")) {
+            client.player.networkHandler.sendCommand(message.substring(1));
+        } else {
+            client.player.networkHandler.sendChatMessage(message);
+        }
+    }
+}

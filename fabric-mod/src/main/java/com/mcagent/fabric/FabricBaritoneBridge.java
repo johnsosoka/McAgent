@@ -1,4 +1,4 @@
-package com.mcagent.mod.service;
+package com.mcagent.fabric;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
@@ -11,26 +11,29 @@ import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.process.ICustomGoalProcess;
 import baritone.api.process.IFollowProcess;
 import baritone.api.process.IMineProcess;
-import baritone.api.utils.BlockOptionalMeta;
+import baritone.api.utils.BlockOptionalMetaLookup;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
 import lombok.extern.slf4j.Slf4j;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
+import net.minecraft.entity.Entity;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /**
- * Baritone-backed implementation of {@link BotOperations}.
+ * Baritone-backed implementation of {@link BotOperations} for Fabric 26.1.2.
  * Bridges core business logic to the Baritone pathfinding engine.
  *
- * <p>Compatible with Baritone v1.10.1 API (official mappings for MC 1.20.1).</p>
+ * <p>Compatible with Baritone v1.15.0+ API (Mojmap for MC 26.1.2).</p>
  */
 @Slf4j
-public class BaritoneOperationsImpl implements BotOperations {
+public class FabricBaritoneBridge implements BotOperations {
 
     private static final Map<String, Block> BLOCK_MAP = Map.ofEntries(
             Map.entry("DIAMOND_ORE", Blocks.DIAMOND_ORE),
@@ -55,7 +58,7 @@ public class BaritoneOperationsImpl implements BotOperations {
     private boolean wasFollowing;
     private int pathStuckTicks;
 
-    public BaritoneOperationsImpl() {
+    public FabricBaritoneBridge() {
         this.baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
         this.progressCallback = msg -> {}; // no-op until set
 
@@ -82,7 +85,7 @@ public class BaritoneOperationsImpl implements BotOperations {
     @Override
     public PathResult navigateTo(int x, int y, int z) {
         log.info("Baritone: pathTo({}, {}, {})", x, y, z);
-        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(x, y, z));
+        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BlockPos(x, y, z)));
         notify("Navigating to (" + x + ", " + y + ", " + z + ")");
         return PathResult.builder()
                 .success(true)
@@ -127,8 +130,8 @@ public class BaritoneOperationsImpl implements BotOperations {
         }
 
         IMineProcess mining = baritone.getMineProcess();
-        BlockOptionalMeta bom = new BlockOptionalMeta(block);
-        mining.mine(maxBlocks, bom);
+        BlockOptionalMetaLookup boml = new BlockOptionalMetaLookup(block);
+        mining.mine(maxBlocks, boml);
         notify("Mining " + blockType + " (up to " + maxBlocks + " blocks)");
 
         return PathResult.builder()
@@ -149,12 +152,12 @@ public class BaritoneOperationsImpl implements BotOperations {
 
     @Override
     public void pause() {
-        log.warn("Baritone pause not supported in v1.10.1 API");
+        log.warn("Baritone pause not supported in this API version");
     }
 
     @Override
     public void resume() {
-        log.warn("Baritone resume not supported in v1.10.1 API");
+        log.warn("Baritone resume not supported in this API version");
     }
 
     @Override
@@ -163,13 +166,27 @@ public class BaritoneOperationsImpl implements BotOperations {
         return new Location(pos.x, pos.y, pos.z);
     }
 
+    void onClientTick() {
+        // Baritone event listeners handle progress via onPathEvent/onTick callbacks
+        // This hook is available for any Fabric-specific tick logic if needed
+    }
+
     private void handlePathEvent(PathEvent event) {
         switch (event) {
-            case AT_GOAL -> notify("Arrived at destination.");
-            case CALC_FAILED -> notify("Cannot find a path to the destination.");
-            case CANCELED -> notify("Pathing was cancelled.");
+            case AT_GOAL -> {
+                pathStuckTicks = 0;
+                notify("Arrived at destination.");
+            }
+            case CALC_FAILED -> {
+                pathStuckTicks = 0;
+                notify("Cannot find a path to the destination.");
+            }
+            case CANCELED -> {
+                pathStuckTicks = 0;
+                notify("Pathing was cancelled.");
+            }
             case CALC_FINISHED_NOW_EXECUTING -> {
-                // Path found and bot is starting to walk
+                pathStuckTicks = 0;
                 log.debug("Path calculation complete; now executing");
             }
             case NEXT_CALC_FAILED -> {
@@ -223,9 +240,11 @@ public class BaritoneOperationsImpl implements BotOperations {
             return block;
         }
         try {
-            return net.minecraft.core.registries.BuiltInRegistries.BLOCK.get(
-                    new net.minecraft.resources.ResourceLocation(blockType.toLowerCase())
-            );
+            Identifier id = Identifier.tryParse(blockType.toLowerCase());
+            if (id == null) {
+                id = Identifier.of("minecraft", blockType.toLowerCase());
+            }
+            return Registries.BLOCK.get(id);
         } catch (Exception e) {
             log.warn("Could not resolve block: {}", blockType);
             return null;

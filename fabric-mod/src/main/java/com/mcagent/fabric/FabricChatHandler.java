@@ -1,22 +1,25 @@
-package com.mcagent.mod.handler;
+package com.mcagent.fabric;
 
 import com.mcagent.core.model.BotResponse;
 import com.mcagent.core.service.LangChain4jService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.minecraft.client.Minecraft;
-import net.minecraftforge.client.event.ClientChatReceivedEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraft.client.MinecraftClient;
 
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Handles incoming Minecraft chat messages and delegates to the LLM service.
+ * Replaces the Forge ChatEventHandler with Fabric event registration.
  */
 @Slf4j
 @RequiredArgsConstructor
-public class ChatEventHandler {
+public class FabricChatHandler {
 
     private final LangChain4jService langChainService;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
@@ -25,14 +28,26 @@ public class ChatEventHandler {
         return t;
     });
 
-    @SubscribeEvent
-    public void onChatReceived(ClientChatReceivedEvent event) {
-        String message = event.getMessage().getString();
+    private static final Pattern CHAT_PATTERN = Pattern.compile("^<(\\w+)>\\s*(.+)");
+    private static final Pattern ALTERNATIVE_PATTERN = Pattern.compile("^(\\w+):\\s*(.+)");
+
+    // Triggers sorted by length descending so longer triggers match first
+    private static final String[] TRIGGERS = Arrays.stream(new String[]{"hey bot", "mcagent", "agent", "bot"})
+            .sorted(Comparator.comparingInt(String::length).reversed())
+            .toArray(String[]::new);
+
+    public void onChatMessage(String message) {
         String playerName = extractPlayerName(message);
         String command = extractCommand(message);
 
         if (command == null) {
             return; // Not directed at bot
+        }
+
+        // Ignore messages sent by the local player (the bot itself)
+        String localPlayer = getLocalPlayerName();
+        if (localPlayer != null && localPlayer.equalsIgnoreCase(playerName)) {
+            return;
         }
 
         executor.submit(() -> {
@@ -41,13 +56,20 @@ public class ChatEventHandler {
                 BotResponse response = langChainService.processInput(command, playerName);
 
                 if (response != null && response.getMessage() != null) {
-                    sendChatMessage(response.getMessage());
+                    FabricChatSender.send(response.getMessage());
                 }
             } catch (Exception e) {
                 log.error("Error processing chat command", e);
-                sendChatMessage("Sorry, something went wrong: " + e.getMessage());
+                FabricChatSender.send("Sorry, something went wrong: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Shut down the background executor. Called on disconnect.
+     */
+    public void shutdown() {
+        executor.shutdownNow();
     }
 
     /**
@@ -55,15 +77,11 @@ public class ChatEventHandler {
      */
     private String extractCommand(String message) {
         String lower = message.toLowerCase();
-        String[] triggers = {"bot", "agent", "hey bot", "mcagent"};
-
-        for (String trigger : triggers) {
-            if (lower.contains(trigger)) {
-                // Return the message with the trigger removed, preserving original casing after trigger
-                int idx = lower.indexOf(trigger);
+        for (String trigger : TRIGGERS) {
+            int idx = lower.indexOf(trigger);
+            if (idx >= 0) {
                 int end = idx + trigger.length();
                 String remainder = message.substring(end).trim();
-                // Remove common separators
                 remainder = remainder.replaceFirst("^[,:;\\-\\s]+", "");
                 return remainder.isEmpty() ? null : remainder;
             }
@@ -76,34 +94,19 @@ public class ChatEventHandler {
      * Minecraft chat format varies by server; this is a best-effort heuristic.
      */
     private String extractPlayerName(String message) {
-        // Common formats: "<PlayerName> message" or "[Prefix] PlayerName: message"
-        if (message.startsWith("<")) {
-            int end = message.indexOf(">");
-            if (end > 1) {
-                return message.substring(1, end);
-            }
+        Matcher m = CHAT_PATTERN.matcher(message);
+        if (m.matches()) {
+            return m.group(1);
         }
-        // Fallback: unknown
+        m = ALTERNATIVE_PATTERN.matcher(message);
+        if (m.matches()) {
+            return m.group(1);
+        }
         return "unknown";
     }
 
-    private void sendChatMessage(String msg) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) {
-            // Truncate to avoid chat kick for long messages
-            String truncated = msg.length() > 250 ? msg.substring(0, 250) + "..." : msg;
-            try {
-                // Minecraft 1.20.1: send via player connection
-                mc.player.connection.sendChat(truncated);
-            } catch (Exception e1) {
-                try {
-                    // Fallback: try command packet
-                    mc.player.connection.sendCommand(truncated);
-                } catch (Exception e2) {
-                    log.warn("Could not send chat message; logging locally: {}", truncated);
-                    mc.gui.getChat().addMessage(net.minecraft.network.chat.Component.literal(truncated));
-                }
-            }
-        }
+    private String getLocalPlayerName() {
+        var player = MinecraftClient.getInstance().player;
+        return player != null ? player.getName().getString() : null;
     }
 }
