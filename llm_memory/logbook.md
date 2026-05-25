@@ -406,8 +406,8 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [x] Add `@Tool` methods to `MinecraftTools`
 - [x] Add system prompt guidance for entity scanning tools
 - [x] Core unit tests
-- [ ] Fabric integration validation (in-game test)
-- [ ] Merge to `main` (pending human approval)
+- [x] Fabric integration validation (in-game test) — PASSED
+- [ ] Merge to `main` (PR opened)
 
 ### Validation guide
 

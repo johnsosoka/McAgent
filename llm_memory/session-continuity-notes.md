@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-25
 **Branch:** `issue/4-player-entity-scanning`
-**Status:** Sprint #4 implementation complete — awaiting in-game validation
+**Status:** Sprint #4 complete — validated in-game, PR opened
 
 ---
 
@@ -26,7 +26,7 @@ Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** 
 ### Open Issues (backlog)
 | Issue | Title | Priority | Blockers |
 |-------|-------|----------|----------|
-| #4 | Player / Entity Scanning | **Current sprint** | None |
+| #4 | Player / Entity Scanning | **Complete** | None |
 | #5 | Advanced Pathing Goals | Pending #4 | #4 (fleeing needs entity location) |
 | #6 | Safety Mode & Health Monitoring | Pending #4, #5 | #4 (nearby threats), #5 (GoalInverted) |
 | #7 | Inventory Queries | Pending #5 | None (can be done anytime) |
@@ -57,8 +57,8 @@ Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** 
 - ✅ Build & tests — 26 tests passing, core + fabric-mod compile green
 - ✅ Code review — passed (direction formula bug caught and fixed)
 
-### Remaining before merge
-- [ ] In-game validation (deploy JAR, test `agent where is Steve?`, `agent scan for creepers`)
+### Validation results
+- [x] In-game validation PASSED (`locatePlayer`, `scanForPlayers`, `scanForEntities` all working)
 - [ ] Human approval for merge to `main`
 
 ### Interface Targets (all implemented)
