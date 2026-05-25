@@ -1,7 +1,10 @@
 package com.mcagent.core.service;
 
+import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PathResult;
+import com.mcagent.core.model.PlayerInfo;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -32,6 +35,24 @@ public interface BotOperations {
      * Returns empty if the player is not visible (out of render distance or offline).
      */
     Optional<Location> getPlayerPosition(String playerName);
+
+    /**
+     * Locate a player by name in the loaded world and return their position,
+     * distance from the bot, and relative direction.
+     * Returns null if the player is not visible.
+     */
+    PlayerInfo findPlayer(String playerName);
+
+    /**
+     * Scan for all loaded players within a given radius and return their info.
+     */
+    List<PlayerInfo> getNearbyPlayers(int radius);
+
+    /**
+     * Scan for entities of a specific type within a given radius.
+     * entityType should match Minecraft entity class names (e.g. "Creeper", "Zombie", "Pig").
+     */
+    List<EntityInfo> getNearbyEntities(String entityType, int radius);
 
     /**
      * Register a callback that receives human-readable progress/status messages

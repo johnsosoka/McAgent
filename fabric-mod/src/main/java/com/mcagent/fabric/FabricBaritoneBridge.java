@@ -12,8 +12,11 @@ import baritone.api.process.ICustomGoalProcess;
 import baritone.api.process.IFollowProcess;
 import baritone.api.process.IMineProcess;
 import baritone.api.utils.BlockOptionalMetaLookup;
+import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PathResult;
+import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.core.service.BotOperations.Location;
 import com.mcagent.fabric.queue.ClientThreadExecutor;
 import lombok.extern.slf4j.Slf4j;
 import net.minecraft.client.Minecraft;
@@ -25,6 +28,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -195,6 +200,100 @@ public class FabricBaritoneBridge implements BotOperations {
             }
             return Optional.<Location>empty();
         });
+    }
+
+    @Override
+    public PlayerInfo findPlayer(String playerName) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null || mc.player == null) {
+                return null;
+            }
+            Location botPos = new Location(mc.player.blockPosition().getX(), mc.player.blockPosition().getY(), mc.player.blockPosition().getZ());
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                if (entity instanceof Player p && p.getName().getString().equalsIgnoreCase(playerName)) {
+                    BlockPos pos = p.blockPosition();
+                    Location loc = new Location(pos.getX(), pos.getY(), pos.getZ());
+                    double dist = botPos.distanceTo(loc);
+                    String dir = calculateDirection(botPos, loc);
+                    return PlayerInfo.builder()
+                            .name(p.getName().getString())
+                            .location(loc)
+                            .distance(dist)
+                            .direction(dir)
+                            .build();
+                }
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public List<PlayerInfo> getNearbyPlayers(int radius) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null || mc.player == null) {
+                return new ArrayList<>();
+            }
+            Location botPos = new Location(mc.player.blockPosition().getX(), mc.player.blockPosition().getY(), mc.player.blockPosition().getZ());
+            List<PlayerInfo> players = new ArrayList<>();
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                if (entity instanceof Player p && p != mc.player) {
+                    BlockPos pos = p.blockPosition();
+                    Location loc = new Location(pos.getX(), pos.getY(), pos.getZ());
+                    double dist = botPos.distanceTo(loc);
+                    if (dist <= radius) {
+                        players.add(PlayerInfo.builder()
+                                .name(p.getName().getString())
+                                .location(loc)
+                                .distance(dist)
+                                .direction(calculateDirection(botPos, loc))
+                                .build());
+                    }
+                }
+            }
+            players.sort((a, b) -> Double.compare(a.getDistance(), b.getDistance()));
+            return players;
+        });
+    }
+
+    @Override
+    public List<EntityInfo> getNearbyEntities(String entityType, int radius) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null || mc.player == null) {
+                return new ArrayList<>();
+            }
+            Location botPos = new Location(mc.player.blockPosition().getX(), mc.player.blockPosition().getY(), mc.player.blockPosition().getZ());
+            List<EntityInfo> entities = new ArrayList<>();
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                if (entity.getClass().getSimpleName().equalsIgnoreCase(entityType)) {
+                    BlockPos pos = entity.blockPosition();
+                    Location loc = new Location(pos.getX(), pos.getY(), pos.getZ());
+                    double dist = botPos.distanceTo(loc);
+                    if (dist <= radius) {
+                        entities.add(EntityInfo.builder()
+                                .type(entity.getClass().getSimpleName())
+                                .location(loc)
+                                .distance(dist)
+                                .direction(calculateDirection(botPos, loc))
+                                .build());
+                    }
+                }
+            }
+            entities.sort((a, b) -> Double.compare(a.getDistance(), b.getDistance()));
+            return entities;
+        });
+    }
+
+    private String calculateDirection(Location from, Location to) {
+        double dx = to.x() - from.x();
+        double dz = to.z() - from.z();
+        double angle = Math.toDegrees(Math.atan2(dx, -dz));
+        if (angle < 0) angle += 360;
+        String[] dirs = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+        int index = (int) Math.round(angle / 45) % 8;
+        return dirs[index];
     }
 
     void onClientTick() {

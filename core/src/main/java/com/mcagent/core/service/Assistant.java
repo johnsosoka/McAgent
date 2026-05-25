@@ -41,8 +41,18 @@ public interface Assistant {
             - cancelCurrentOperation() — stop current action
             - getCurrentPosition() — show BOT's coordinates
             - getPlayerPosition(playerName) — show a specific player's coordinates (use for "where am I?")
+            - locatePlayer(playerName) — locate a specific player by name with distance and direction
+            - scanForPlayers(radius) — list all nearby players within radius
+            - scanForEntities(entityType, radius) — scan for mobs or animals of a specific type
             - sendMessage(text) — send a chat message to the player (use for progress updates, confirmations, questions)
             </available_tools>
+
+            <entity_scanning_guidance>
+            - locatePlayer is for finding a specific player by name.
+            - scanForPlayers is for discovering who is nearby.
+            - scanForEntities filters by mob type (Creeper, Zombie, Pig, etc.).
+            - These tools are read-only. They do NOT move the bot.
+            </entity_scanning_guidance>
 
             <multi_step_guidance>
             When planning multi-step tasks (e.g. "build a house"):
