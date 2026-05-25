@@ -407,7 +407,7 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [x] Add system prompt guidance for entity scanning tools
 - [x] Core unit tests
 - [x] Fabric integration validation (in-game test) — PASSED
-- [ ] Merge to `main` (PR opened)
+- [x] Merge to `main` — PR #11 merged, Issue #4 closed
 
 ### Validation guide
 
@@ -419,4 +419,201 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 
 ---
 
-*Next in queue after #4: Issue #5 — Advanced Pathing Goals (`GoalXZ`, `GoalYLevel`, `GoalNear`, `GoalInverted`).*
+---
+
+## 2026-05-25 — Session: Sprint Planning — Issue #5 Advanced Pathing Goals
+
+**Branch:** `issue/5-advanced-pathing-goals`
+**Issue:** [#5](https://github.com/johnsosoka/McAgent/issues/5)
+**Status:** Sprint started, branch cut from latest `main`
+
+### What we did
+
+1. **Repo audit** — Verified `main` is clean and up-to-date with `origin/main`. PR #11 (Issue #4) fully merged.
+2. **Issue triage** — Reviewed all 5 open enhancement issues (#5–#8, #10). Confirmed #5 as the logical next sprint based on:
+   - The planned roadmap (#3 → #4 → **#5** → #7 → #6 → #8)
+   - #6 (safety/fleeing) is blocked until `GoalInverted` is built in #5
+   - Pure Baritone API — clean wiring of goal classes, no new Minecraft client APIs needed
+   - Low risk (movement commands only, no block placement or inventory changes)
+3. **Branch created** — `issue/5-advanced-pathing-goals` cut from latest `main`.
+
+### Goals for this sprint
+
+- `navigateToXZ(int x, int z)` — path to surface X,Z coordinates (any Y level)
+- `navigateToYLevel(int y)` — path to a specific depth (strip mining)
+- `exploreNear(Location center, int radius)` — explore within radius of a point
+- `fleeFrom(Location threat, int safeDistance)` — retreat using `GoalInverted`
+- `navigateToNearest(List<Location> candidates)` — path to nearest of multiple waypoints (optional stretch)
+
+### Interface targets
+
+**BotOperations.java:**
+- `PathResult navigateToXZ(int x, int z)`
+- `PathResult navigateToYLevel(int y)`
+- `PathResult exploreNear(Location center, int radius)`
+- `PathResult fleeFrom(Location threat, int safeDistance)`
+- `PathResult navigateToNearest(List<Location> candidates)` (stretch)
+
+**MinecraftTools.java:**
+- `@Tool navigateToSurface(x, z)` — "Navigate to surface X,Z coordinates"
+- `@Tool goToDepth(y)` — "Go to a specific Y level, useful for strip mining"
+- `@Tool exploreArea(x, y, z, radius)` — "Explore within a radius of a center point"
+- `@Tool fleeFrom(x, y, z, distance)` — "Flee from specific coordinates to maintain safe distance"
+
+### Remaining work
+
+- [ ] Add methods to `BotOperations` interface
+- [ ] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
+- [ ] Add `@Tool` methods to `MinecraftTools`
+- [ ] Update `Assistant` system prompt
+- [ ] Update `TestRunner` mock
+- [ ] Unit tests
+- [ ] Fabric integration validation (in-game test)
+- [ ] Merge to `main` (pending human approval)
+
+---
+
+---
+
+## 2026-05-25 — Session: Implement Issue #5 — Advanced Pathing Goals
+
+**Branch:** `issue/5-advanced-pathing-goals`
+**Issue:** [#5](https://github.com/johnsosoka/McAgent/issues/5)
+**Status:** Implementation complete, code review passed, build green
+
+### What we did
+
+1. **Scaffolded `BotOperations` interface** — Added 5 new methods:
+   - `navigateToXZ(int x, int z)` — surface X,Z travel
+   - `navigateToYLevel(int y)` — vertical depth navigation
+   - `exploreNear(Location center, int radius)` — exploration within radius
+   - `fleeFrom(Location threat, int safeDistance)` — emergency retreat
+   - `navigateToNearest(List<Location> candidates)` — nearest waypoint selection
+
+2. **Delegated implementation to senior engineer agent** — Full brief at `llm_memory/issue-5-implementation-brief.md`.
+
+3. **Implemented in `FabricBaritoneBridge`:**
+   - All 5 methods wrapped in `ClientThreadExecutor.execute()` for thread safety
+   - `navigateToXZ` — `GoalXZ`
+   - `navigateToYLevel` — `GoalYLevel`
+   - `exploreNear` — `GoalNear`
+   - `fleeFrom` — computes retreat point away from threat, paths to it with `GoalBlock`
+   - `navigateToNearest` — `GoalComposite` built from `GoalBlock` instances
+
+4. **Added `@Tool` methods to `MinecraftTools`:**
+   - `navigateToSurface(x, z)` — surface travel
+   - `goToDepth(y)` — strip mining depth
+   - `exploreArea(x, y, z, radius)` — exploration
+   - `fleeFrom(x, y, z, distance)` — retreat
+   - `navigateToNearestLocation(locationNames)` — parses comma-separated names, looks up in `locationMemory`, picks nearest
+
+5. **Updated `Assistant.java` system prompt:**
+   - Added 5 new tools to `<available_tools>`
+   - Added `<advanced_pathing_guidance>` section
+
+6. **Updated test layer:**
+   - `TestRunner.MockBotOperations` — implements new methods with mock data
+   - `MinecraftToolsTest.java` — 13 unit tests (success + failure for each tool)
+
+7. **Code review findings & fixes:**
+   - **Critical:** Fixed `fleeFrom` — removed incorrect `GoalInverted` wrapper (would path toward threat instead of away); now paths directly to computed retreat point
+   - **Safety:** Fixed retreat Y coordinate to use bot's current Y instead of threat's Y
+   - **Tests:** Added failure-path tests for `goToDepth`, `exploreArea`, `fleeFrom`
+   - **Repo hygiene:** Updated `.gitignore` to exclude build artifacts, IDE files, OS files, runtime logs
+
+### Files changed / created
+
+- `core/src/main/java/com/mcagent/core/service/BotOperations.java` — Added 5 methods.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricBaritoneBridge.java` — Implemented 5 methods.
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — Added 5 `@Tool` methods.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Updated system prompt.
+- `core/src/test/java/com/mcagent/core/TestRunner.java` — Mock implementations.
+- `core/src/test/java/com/mcagent/core/tools/MinecraftToolsTest.java` — 13 tests (6 existing + 7 new).
+- `llm_memory/issue-5-implementation-brief.md` — New. Agent brief.
+- `.gitignore` — Updated with standard exclusions.
+
+### Build & test results
+
+- `:core:compileJava` — SUCCESS
+- `:core:test` — **33 tests PASSED** (20 existing + 13 new)
+- `:fabric-mod:compileJava` — SUCCESS
+
+### Remaining work
+
+- [x] Add methods to `BotOperations` interface
+- [x] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
+- [x] Add `@Tool` methods to `MinecraftTools`
+- [x] Update `Assistant` system prompt
+- [x] Update `TestRunner` mock
+- [x] Unit tests
+- [ ] Fabric integration validation (in-game test)
+- [ ] Merge to `main` (pending human approval)
+
+---
+
+---
+
+## 2026-05-25 — Session: Sprint Planning — Issue #6 Safety Mode & Health Monitoring
+
+**Branch:** `issue/6-safety-mode-health-monitoring`
+**Issue:** [#6](https://github.com/johnsosoka/McAgent/issues/6)
+**Status:** Sprint started, branch cut from latest `main`
+
+### What we did
+
+1. **Repo audit** — Verified `main` is clean and up-to-date with `origin/main`. Issue #5 implementation complete on branch.
+2. **Issue triage** — Reviewed open backlog. Issue #6 is the logical next sprint:
+   - Both blockers resolved: #4 (entity scanning for threats) and #5 (`fleeFrom` for retreat)
+   - Scope expanded during planning to include **respectful pathing / house mode**
+   - High value: prevents property damage, enables door usage, configurable block avoidance
+3. **Updated Issue #6** — Added `setPathingBehavior`, `avoidBreakingBlock`, `clearBlockAvoidance` to acceptance criteria.
+4. **Branch created** — `issue/6-safety-mode-health-monitoring` cut from latest `main`.
+
+### Goals for this sprint
+
+- `setSafetyMode(boolean enabled)` — toggles mob avoidance, parkour, sprint, block breaking, door usage
+- `getHealthStatus()` — reports health, hunger, basic status
+- `getNearbyThreats(int radius)` — lists hostile mobs with distance/direction
+- `setPathingBehavior(String mode)` — "careful", "aggressive", or "default"
+- `avoidBreakingBlock(String blockType)` — add block to avoid-breaking list
+- `clearBlockAvoidance()` — reset avoidance rules
+
+### Interface targets
+
+**BotOperations.java:**
+- `void setSafetyMode(boolean enabled)`
+- `HealthStatus getHealthStatus()`
+- `List<ThreatInfo> getNearbyThreats(int radius)`
+- `void setPathingBehavior(String mode)`
+- `void addBlockToAvoid(String blockType)`
+- `void clearAvoidedBlocks()`
+
+**MinecraftTools.java:**
+- `@Tool setSafetyMode(boolean)` — "Enable/disable safe mode"
+- `@Tool getStatusReport()` — "Report health and threats"
+- `@Tool setPathingBehavior(String)` — "Set careful/aggressive/default pathing"
+- `@Tool avoidBreakingBlock(String)` — "Add block to avoid-breaking list"
+- `@Tool clearBlockAvoidance()` — "Clear custom avoidance rules"
+
+### Behavior Modes
+
+| Mode | allowBreak | allowParkour | allowSprint | allowOpenDoors | blocksToAvoidBreaking |
+|------|-----------|-------------|-------------|---------------|----------------------|
+| **careful** | false | false | false | true | common building blocks |
+| **aggressive** | true | true | true | false | empty |
+| **default** | true | true | true | true | empty |
+
+### Remaining work
+
+- [ ] Add methods to `BotOperations` interface
+- [ ] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
+- [ ] Add `@Tool` methods to `MinecraftTools`
+- [ ] Update `Assistant` system prompt
+- [ ] Update `TestRunner` mock
+- [ ] Unit tests
+- [ ] Fabric integration validation (in-game test)
+- [ ] Merge to `main` (pending human approval)
+
+---
+
+*Next in queue after #6: Issue #7 — Inventory Queries (`checkInventory`, `getInventorySummary`).*

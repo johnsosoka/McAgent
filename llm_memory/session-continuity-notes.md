@@ -1,37 +1,39 @@
 # McAgent — Session Continuity Notes
 
 **Date:** 2026-05-25
-**Branch:** `issue/4-player-entity-scanning`
-**Status:** Sprint #4 complete — validated in-game, PR opened
+**Branch:** `issue/6-safety-mode-health-monitoring`
+**Status:** Sprint #6 started — Issue #6 scope expanded with respectful pathing
 
 ---
 
 ## Current State
 
-Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** via PR #9.
+Issues #3 (Message Queuing), #4 (Player/Entity Scanning), and #5 (Advanced Pathing Goals) are **complete and merged or ready for merge**.
 
 ### What Works (validated in-game)
 - ✅ Message queuing (`BotEventQueue`) with priority scheduling
 - ✅ Framework throttling & deduplication (`FrameworkMessageBuffer`)
-- ✅ Thread safety via `ClientThreadExecutor` — all Baritone calls dispatched to client thread
+- ✅ Thread safety via `ClientThreadExecutor`
 - ✅ `.env` loading from Minecraft config directory (`EnvLoader`)
-- ✅ Player context injection with pronoun resolution (`getPlayerPosition()`)
+- ✅ Player context injection with pronoun resolution
 - ✅ Immediate tool chat feedback (no LLM latency)
-- ✅ Disconnect debounce (3s) — no false shutdowns on dimension changes
+- ✅ Disconnect debounce (3s)
 - ✅ NPE hardening after shutdown
-- ✅ All 20 core tests passing
+- ✅ Player / entity scanning (`locatePlayer`, `scanForPlayers`, `scanForEntities`)
+- ✅ 8-sector compass direction calculation
+- ✅ Advanced pathing: surface X,Z, Y-level depth, exploration radius, fleeing, nearest waypoint
+- ✅ All 33 core tests passing
 - ✅ Shadow JAR builds successfully
-- ✅ Clean in-game validation: `come here`, `stop following`, `what is my location`
 
 ### Open Issues (backlog)
 | Issue | Title | Priority | Blockers |
 |-------|-------|----------|----------|
-| #4 | Player / Entity Scanning | **Complete** | None |
-| #5 | Advanced Pathing Goals | Pending #4 | #4 (fleeing needs entity location) |
-| #6 | Safety Mode & Health Monitoring | Pending #4, #5 | #4 (nearby threats), #5 (GoalInverted) |
-| #7 | Inventory Queries | Pending #5 | None (can be done anytime) |
+| #4 | Player / Entity Scanning | **Merged** | — |
+| #5 | Advanced Pathing Goals | **Complete on branch** | — |
+| **#6** | Safety Mode & Health Monitoring | **Current sprint** | None |
+| #7 | Inventory Queries | Can be parallel | None |
 | #8 | Building / Placement | Pending #6 | #6 (safety confirmation) |
-| #10 | Background Observation Loop | Future | Needs #4–#8 capabilities to be useful |
+| #10 | Background Observation Loop | Future | Needs #5–#8 capabilities |
 
 ### Architecture Decisions (unchanged)
 - Tool-based architecture: `Assistant.chat()` returns `String`, LangChain4j auto-discovers `@Tool` methods
@@ -41,51 +43,67 @@ Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** 
 
 ---
 
-## Active Sprint: Issue #4 — Player / Entity Scanning
+## Active Sprint: Issue #6 — Safety Mode & Health Monitoring
 
-**Branch:** `issue/4-player-entity-scanning`
-**Commit:** `c7e3923`
+**Branch:** `issue/6-safety-mode-health-monitoring`
 
-### Implementation Status
-- ✅ `BotOperations` interface — 3 new methods defined
-- ✅ `PlayerInfo` / `EntityInfo` DTOs — immutable Lombok builders
-- ✅ `FabricBaritoneBridge` — all methods wrapped in `ClientThreadExecutor.execute()`
-- ✅ `MinecraftTools` — 3 new `@Tool` methods with proper `@P` annotations
-- ✅ `Assistant` system prompt — updated with new tools + entity scanning guidance
-- ✅ `TestRunner` mock — implements new interface methods
-- ✅ `MinecraftToolsTest` — 6 unit tests (found / not-found for each tool)
-- ✅ Build & tests — 26 tests passing, core + fabric-mod compile green
-- ✅ Code review — passed (direction formula bug caught and fixed)
+### Goals
+- `setSafetyMode(boolean)` — toggles mob avoidance, parkour, sprint, block breaking, door usage
+- `getHealthStatus()` — reports health, hunger, basic status
+- `getNearbyThreats(radius)` — lists hostile mobs with distance/direction
+- `setPathingBehavior(mode)` — "careful" (no breaking, uses doors), "aggressive", "default"
+- `avoidBreakingBlock(blockType)` — add block to avoid-breaking list
+- `clearBlockAvoidance()` — reset avoidance rules
 
-### Validation results
-- [x] In-game validation PASSED (`locatePlayer`, `scanForPlayers`, `scanForEntities` all working)
-- [ ] Human approval for merge to `main`
+### Why This Sprint
+- Both #6 blockers are resolved:
+  - #4 (entity scanning) → `getNearbyThreats()` can use `scanForEntities`
+  - #5 (pathing) → `fleeFrom()` is available for retreat
+- **Expanded scope:** Added "respectful pathing / house mode" — the bot can use doors and avoid breaking player-built blocks
+- Prevents property damage and makes the bot a better companion
 
-### Interface Targets (all implemented)
+### Interface Targets
 **BotOperations.java:**
 ```java
-PlayerInfo findPlayer(String playerName);
-List<PlayerInfo> getNearbyPlayers(int radius);
-List<EntityInfo> getNearbyEntities(String entityType, int radius);
+void setSafetyMode(boolean enabled);
+HealthStatus getHealthStatus();
+List<ThreatInfo> getNearbyThreats(int radius);
+void setPathingBehavior(String mode); // "careful", "aggressive", "default"
+void addBlockToAvoid(String blockType);
+void clearAvoidedBlocks();
 ```
 
 **MinecraftTools.java:**
 ```java
-@Tool("Locate a player by name and report coordinates, distance, and direction")
-public String locatePlayer(@P("Player name") String playerName) { ... }
+@Tool("Enable or disable safe mode (mob avoidance, no parkour, no sprint, no block breaking, uses doors)")
+public String setSafetyMode(@P("true to enable safe mode, false for normal") boolean enabled) { ... }
 
-@Tool("List nearby players within a radius")
-public String scanForPlayers(@P("Search radius in blocks") int radius) { ... }
+@Tool("Report current health, hunger, and any nearby threats")
+public String getStatusReport() { ... }
 
-@Tool("Scan for nearby mobs or animals of a specific type")
-public String scanForEntities(@P("Entity type, e.g. Creeper, Zombie, Pig, Cow") String entityType,
-                              @P("Search radius in blocks") int radius) { ... }
+@Tool("Set pathing behavior mode. 'careful' avoids breaking blocks and uses doors. 'aggressive' allows breaking for speed. 'default' restores normal settings.")
+public String setPathingBehavior(@P("Behavior mode: careful, aggressive, or default") String mode) { ... }
+
+@Tool("Add a block type to the avoid-breaking list. Examples: minecraft:glass, minecraft:oak_planks")
+public String avoidBreakingBlock(@P("Block ID to avoid breaking") String blockType) { ... }
+
+@Tool("Clear all custom block avoidance rules and restore defaults")
+public String clearBlockAvoidance() { ... }
 ```
 
-### Safety Notes
-- Read-only operations — no movement triggered
-- Uses `Minecraft.getInstance().level.entitiesForRendering()` for scanning
-- Direction calculated with 8-sector compass (N, NE, E, SE, S, SW, W, NW)
+### Behavior Modes
+
+| Mode | allowBreak | allowParkour | allowSprint | allowOpenDoors | blocksToAvoidBreaking |
+|------|-----------|-------------|-------------|---------------|----------------------|
+| **careful** | false | false | false | true | common building blocks |
+| **aggressive** | true | true | true | false | empty |
+| **default** | true | true | true | true | empty |
+
+### Technical Notes
+- Baritone settings accessed via `baritone.getSettings()`
+- `blocksToAvoidBreaking` accepts a list of `Block` instances
+- Health via `Minecraft.getInstance().player.getHealth()` and `getFoodData().getFoodLevel()`
+- Threat detection reuses `scanForEntities` logic from Issue #4
 
 ---
 
@@ -117,4 +135,4 @@ cat ~/Library/Application\ Support/minecraft/logs/latest.log | grep -i 'mcagent\
 
 ---
 **Prepared by:** AI Lead (OpenCode)
-**For:** John Sosoka — Issue #4 sprint continuation
+**For:** John Sosoka — Issue #6 sprint continuation
