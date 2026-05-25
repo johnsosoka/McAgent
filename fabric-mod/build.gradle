@@ -1,0 +1,127 @@
+plugins {
+    id 'java'
+    id 'xyz.wagyourtail.unimined' version '1.4.2-SNAPSHOT'
+    id 'maven-publish'
+    id 'com.gradleup.shadow' version '8.3.6'
+}
+
+version = '0.2.0-SNAPSHOT'
+group = 'com.mcagent'
+
+base {
+    archivesName = 'mc-agent-fabric'
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://jitpack.io' }
+    maven { url = 'https://maven.fabricmc.net/' }
+    maven { url = 'https://files.minecraftforge.net/maven/' }
+    maven { url = 'https://maven.wagyourtail.xyz/releases' }
+    flatDir {
+        dirs '../.local-deps'
+    }
+}
+
+dependencies {
+    // Minecraft 26.1.2 remapped JAR (provided by Unimined cache)
+    compileOnly files("${gradle.gradleUserHomeDir}/caches/unimined/net/minecraft/minecraft/26.1.2/minecraft-26.1.2-fabric-merged+fixed-official.jar")
+
+    // Mixin (for our mixins)
+    compileOnly 'org.spongepowered:mixin:0.8.7'
+    annotationProcessor 'org.spongepowered:mixin:0.8.7'
+    annotationProcessor 'com.google.code.gson:gson:2.11.0'
+    annotationProcessor 'com.google.guava:guava:33.5.0-jre'
+    annotationProcessor 'org.ow2.asm:asm:9.7'
+    annotationProcessor 'org.ow2.asm:asm-tree:9.7'
+
+    // Baritone (compile-only — provided by baritone-unoptimized-fabric mod at runtime)
+    compileOnly name: 'baritone-unoptimized-fabric-1.17.0'
+
+    // Core module
+    implementation project(':core')
+
+    // Spring annotations needed for compile (core uses implementation scope)
+    compileOnly platform('org.springframework.boot:spring-boot-dependencies:3.4.0')
+    compileOnly 'org.springframework.boot:spring-boot-starter'
+    compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok:1.18.38'
+    annotationProcessor 'org.projectlombok:lombok:1.18.38'
+
+    // Shadow plugin will bundle core's transitive dependencies
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
+}
+
+unimined.minecraft {
+    version '26.1.2'
+
+    mappings {
+        mojmap()
+        devFallbackNamespace 'official'
+    }
+
+    fabric {
+        loader '0.18.6'
+    }
+}
+
+afterEvaluate {
+    configurations.compileClasspath.extendsFrom(configurations.minecraft)
+    configurations.compileClasspath.extendsFrom(configurations.minecraftLibraries)
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+}
+
+shadowJar {
+    archiveClassifier.set('all')
+    zip64 = true
+    mergeServiceFiles()
+
+    // Exclude Minecraft and Fabric classes from shading
+    exclude 'net/minecraft/**'
+    exclude 'net/fabricmc/**'
+    exclude 'org/slf4j/**'
+    exclude 'org/apache/logging/**'
+
+    // Relocate shaded dependencies to avoid classloader conflicts
+    relocate 'org.springframework', 'com.mcagent.shaded.org.springframework'
+    relocate 'dev.langchain4j', 'com.mcagent.shaded.dev.langchain4j'
+    relocate 'com.fasterxml.jackson', 'com.mcagent.shaded.com.fasterxml.jackson'
+    relocate 'com.google.gson', 'com.mcagent.shaded.com.google.gson'
+    relocate 'org.hibernate', 'com.mcagent.shaded.org.hibernate'
+    relocate 'org.yaml', 'com.mcagent.shaded.org.yaml'
+    relocate 'com.zaxxer', 'com.mcagent.shaded.com.zaxxer'
+    relocate 'org.aspectj', 'com.mcagent.shaded.org.aspectj'
+    relocate 'io.micrometer', 'com.mcagent.shaded.io.micrometer'
+    relocate 'jakarta', 'com.mcagent.shaded.jakarta'
+    relocate 'org.jboss', 'com.mcagent.shaded.org.jboss'
+    relocate 'com.google.common', 'com.mcagent.shaded.com.google.common'
+    relocate 'org.apache.httpcomponents', 'com.mcagent.shaded.org.apache.httpcomponents'
+    relocate 'io.netty', 'com.mcagent.shaded.io.netty'
+    relocate 'org.antlr', 'com.mcagent.shaded.org.antlr'
+    relocate 'org.opennlp', 'com.mcagent.shaded.org.opennlp'
+    relocate 'com.github.oshi', 'com.mcagent.shaded.com.github.oshi'
+    relocate 'com.machinezoo', 'com.mcagent.shaded.com.machinezoo'
+    relocate 'com.knuddels', 'com.mcagent.shaded.com.knuddels'
+    relocate 'com.ibm.icu', 'com.mcagent.shaded.com.ibm.icu'
+    relocate 'org.glassfish', 'com.mcagent.shaded.org.glassfish'
+    relocate 'org.eclipse', 'com.mcagent.shaded.org.eclipse'
+    relocate 'com.sun', 'com.mcagent.shaded.com.sun'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 25
+}

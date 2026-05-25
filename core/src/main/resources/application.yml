@@ -1,0 +1,82 @@
+bot:
+  name: "McAgent"
+  trigger-words:
+    - "bot"
+    - "agent"
+    - "hey bot"
+  chat:
+    max-history: 20
+    response-timeout-seconds: 30
+  safety:
+    require-confirmation-for-dangerous: true
+    dangerous-blocks:
+      - "TNT"
+      - "LAVA"
+    max-mining-depth: 16
+
+llm:
+  primary-provider: fireworks
+  fireworks:
+    base-url: "https://api.fireworks.ai/inference/v1"
+    api-key: ${FIREWORKS_API_KEY:}
+    model: "accounts/fireworks/models/kimi-k2p5"
+    temperature: 0.7
+    timeout-seconds: 30
+    max-tokens: 2048
+  embedding:
+    provider: fireworks
+    model: "nomic-ai/nomic-embed-text-v1.5"
+
+database:
+  type: h2
+  h2:
+    url: jdbc:h2:file:./data/mc_agent_db;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+    username: sa
+    password:
+  postgresql:
+    url: jdbc:postgresql://localhost:5432/mc_agent
+    username: ${DB_USER:mc_agent}
+    password: ${DB_PASSWORD:}
+
+vector-store:
+  type: chroma
+  chroma:
+    host: localhost
+    port: 8000
+    collection: mc_agent_locations
+    timeout-seconds: 5
+  in-memory:
+    persist-path: ./data/vector_store.json
+
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: ${database.h2.url}
+    username: ${database.h2.username}
+    password: ${database.h2.password}
+    driver-class-name: org.h2.Driver
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${database.postgresql.url}
+    username: ${database.postgresql.username}
+    password: ${database.postgresql.password}
+    driver-class-name: org.postgresql.Driver

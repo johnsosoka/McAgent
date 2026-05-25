@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "com.mcagent.fabric.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "ChatComponentMixin",
+    "MinecraftMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

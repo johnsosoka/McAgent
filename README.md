@@ -1,74 +1,117 @@
 # McAgent
 
-LLM-driven autonomous Minecraft agent. Bridges natural-language commands to in-game actions using **LangChain4j** + **Baritone** inside a **Forge 1.20.1** client mod.
+LLM-driven autonomous Minecraft agent. Bridges natural-language commands to in-game actions using **LangChain4j** + **Baritone** inside a **Fabric 26.1.2** client mod.
 
-## Architecture (Unified)
+> **Note:** This branch (`feature/fabric-26.1.2-port`) is actively under development. See [llm_memory/session-continuity-notes.md](llm_memory/session-continuity-notes.md) for current status.
 
-Single Gradle project with ForgeGradle:
+## Architecture
+
+Multi-module Gradle project:
 
 ```
-src/main/java/com/mcagent/
-├── core/          # Pure Java: LLM, memory, tools, config (Spring Boot headless)
-│   ├── config/    # Properties, LangChain4j beans, Chroma config
-│   ├── memory/    # JPA entities, repos, SQL + vector search
-│   ├── tools/     # @Tool definitions for LLM
-│   ├── model/     # BotResponse, BotAction, PathResult
-│   └── service/   # Assistant, LangChain4jService, SafetyValidator
-└── mod/           # Thin Forge wrapper
-    ├── MinecraftAgentMod.java    # Forge entry point + Spring bootstrap
-    ├── handler/ChatEventHandler.java
-    └── service/BaritoneOperationsImpl.java
+McAgent/
+├── core/              # Pure Java: Spring Boot + LangChain4j (headless)
+│   ├── config/        # JPA, LangChain4j, Chroma/in-memory vector store
+│   ├── memory/        # JPA entities, repos, SQL + semantic search
+│   ├── tools/         # @Tool definitions for LLM (navigate, mine, etc.)
+│   └── service/       # Assistant, LangChain4jService
+├── fabric-mod/        # Fabric wrapper (Mojang mappings, Mixins)
+│   ├── McAgentFabricMod.java      # Entry point + Spring bootstrap
+│   ├── FabricChatHandler.java     # Chat interception
+│   ├── FabricBaritoneBridge.java  # Baritone API bridge
+│   └── mixin/                     # ChatComponentMixin, MinecraftMixin
+└── settings.gradle
 ```
 
-## Quick Start
+## Prerequisites
 
-### Prerequisites
-- Java 17
-- Gradle 8.x (ForgeGradle requires < 9.0)
-- Forge 1.20.1 client with Baritone 1.10.1 installed
+- **Java 25** (Zulu JDK recommended for macOS): `brew install --cask zulu-jdk25`
+- **Java 21** (for running tests): `brew install openjdk@21`
+- **Gradle 8.14.5** (wrapper included)
+- **Fabric Loader 0.19.2** for Minecraft 26.1.2
+- **Baritone** 1.17.0 (Fabric, unobfuscated — built from `fnltochka/baritone` 26.1 fork)
 
-### Build
+## Setup
+
+### 1. Configure API Key
+
+Set your Fireworks.ai API key **before** building:
+
 ```bash
+export FIREWORKS_API_KEY=your_key_here
+```
+
+Or edit `core/src/main/resources/application.yml`:
+```yaml
+llm:
+  fireworks:
+    api-key: ${FIREWORKS_API_KEY:}
+```
+
+### 2. Build
+
+```bash
+# Full build + tests (core on Java 21, fabric-mod on Java 25)
 ./gradlew build
-# Mod JAR: build/libs/mc-agent-0.1.0-SNAPSHOT.jar
+
+# Just the mod JAR
+./gradlew :fabric-mod:shadowJar
 ```
 
-### Run Tests
+### 3. Install
+
 ```bash
-./gradlew test
+# Install Fabric Loader for 26.1.2
+java -jar fabric-installer-1.0.1.jar client -mcversion 26.1.2
+
+# Copy mods to Minecraft
+./gradlew :fabric-mod:shadowJar && \
+  cp fabric-mod/build/libs/mc-agent-fabric-0.2.0-SNAPSHOT-all.jar \
+  ~/Library/Application\ Support/minecraft/mods/
+
+# Also install Baritone (unobfuscated Fabric build)
+cp baritone-unoptimized-fabric-1.17.0.jar \
+  ~/Library/Application\ Support/minecraft/mods/
 ```
 
-### Run Client (with mod in dev environment)
-```bash
-./gradlew runClient
-```
+### 4. Launch
 
-### Install
-1. Install Forge 1.20.1 client
-2. Drop `baritone-standalone-forge-1.10.1.jar` into `.minecraft/mods/`
-3. Drop `mc-agent-0.1.0-SNAPSHOT.jar` into `.minecraft/mods/`
-4. Set `FIREWORKS_API_KEY` environment variable
-5. Launch Forge client and join a vanilla server
+Select `fabric-loader-0.19.2-26.1.2` in your Minecraft launcher and join a world.
 
-### In-Game Usage
+## In-Game Usage
+
 Chat commands directed at the bot (containing "bot", "agent", or "mcagent"):
-- `agent go to 100 64 200`
+- `agent what is my location`
+- `bot go to 100 64 200`
+- `agent come here` (uses followPlayer tool)
 - `bot remember this as home base`
 - `agent find me some diamonds`
-- `bot where is home base?`
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `FIREWORKS_API_KEY` | Yes | Fireworks.ai API key |
-| `BOT_NAME` | No | Bot display name |
+
+## Troubleshooting
+
+### "Chat disabled due to broken chain"
+- The mod now uses `sendChat()` (signed chat path) instead of `/say`
+- Progress messages go to LLM memory only — not public chat
+- 3-second rate limiter prevents spam kicks
+
+### "Model not found"
+- Verify `llm.fireworks.model` in `application.yml`
+- Current default: `accounts/fireworks/models/kimi-k2p5`
+
+### Spring context fails to boot
+- Check `~/Library/Application\ Support/minecraft/logs/latest.log`
+- Common issues: missing API key, Java version mismatch
 
 ## Documentation
-- [Revised Sprint Plan](llm_memory/revised-plan.md)
-- [Merge Plan](llm_memory/merge-plan.md)
-- [DevOps Setup Report](llm_memory/devops-setup-report.md)
-- [Core Implementation Notes](llm_memory/core-implementation-notes.md)
-- [Test Summary](llm_memory/test-summary.md)
-- [Architecture Specification](reference/minecraft-bot-architecture-spec.md)
+
+- [Session Continuity Notes](llm_memory/session-continuity-notes.md) — Current working session status
+- [Research Report](llm_memory/research-report-26.1.2.md) — Forge vs Fabric analysis
+- [Porting Plan](llm_memory/fabric-porting-plan.md) — Full execution plan
+- [Architecture Spec](reference/minecraft-bot-architecture-spec.md)
 - [Baritone API Reference](reference/baritone-api-reference.md)

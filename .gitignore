@@ -24,6 +24,7 @@
 
 # Local compile-only dependencies
 !.local-deps/baritone-api-forge-1.10.1.jar
+!.local-deps/baritone-unoptimized-fabric-1.17.0.jar
 
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
