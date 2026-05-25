@@ -20,6 +20,7 @@ import static org.mockito.Mockito.when;
 class MinecraftToolsTest {
 
     private BotOperations bot;
+    private ChatService chatService;
     private MinecraftTools tools;
 
     @BeforeEach
@@ -28,7 +29,7 @@ class MinecraftToolsTest {
         LocationMemoryService locationMemory = mock(LocationMemoryService.class);
         VectorMemoryService vectorMemory = mock(VectorMemoryService.class);
         PlayerNoteService playerNoteService = mock(PlayerNoteService.class);
-        ChatService chatService = mock(ChatService.class);
+        chatService = mock(ChatService.class);
         tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService);
     }
 
@@ -108,5 +109,74 @@ class MinecraftToolsTest {
 
         assertThat(result).isEqualTo("No Zombie found within 50 blocks.");
         verify(bot).getNearbyEntities("Zombie", 50);
+    }
+
+    @Test
+    void setSafetyMode_shouldCallBotAndChat_whenEnabled() {
+        String result = tools.setSafetyMode(true);
+
+        verify(bot).setSafetyMode(true);
+        verify(chatService).send("Safe mode enabled. I'll be careful.");
+        assertThat(result).isEqualTo("Safe mode enabled");
+    }
+
+    @Test
+    void setSafetyMode_shouldCallBotAndChat_whenDisabled() {
+        String result = tools.setSafetyMode(false);
+
+        verify(bot).setSafetyMode(false);
+        verify(chatService).send("Safe mode disabled. Normal behavior restored.");
+        assertThat(result).isEqualTo("Safe mode disabled");
+    }
+
+    @Test
+    void getStatusReport_shouldReturnFormattedStatus_withThreats() {
+        when(bot.getHealthStatus()).thenReturn(new BotOperations.HealthStatus(18.0f, 20.0f, 15, 8));
+        when(bot.getNearbyThreats(32)).thenReturn(List.of(
+                new BotOperations.ThreatInfo("Creeper", new BotOperations.Location(100, 64, 100), 12.0, "NE")
+        ));
+
+        String result = tools.getStatusReport();
+
+        assertThat(result).isEqualTo("Status: Health: 18/20, Food: 15/20, Armor: 8. Nearby threats: Creeper at (100, 64, 100), 12 blocks NE");
+        verify(bot).getHealthStatus();
+        verify(bot).getNearbyThreats(32);
+    }
+
+    @Test
+    void getStatusReport_shouldReturnFormattedStatus_whenNoThreats() {
+        when(bot.getHealthStatus()).thenReturn(new BotOperations.HealthStatus(20.0f, 20.0f, 20, 10));
+        when(bot.getNearbyThreats(32)).thenReturn(List.of());
+
+        String result = tools.getStatusReport();
+
+        assertThat(result).isEqualTo("Status: Health: 20/20, Food: 20/20, Armor: 10. Nearby threats: none");
+        verify(bot).getHealthStatus();
+        verify(bot).getNearbyThreats(32);
+    }
+
+    @Test
+    void setPathingBehavior_shouldCallBotAndChat_whenCareful() {
+        String result = tools.setPathingBehavior("careful");
+
+        verify(bot).setPathingBehavior("careful");
+        verify(chatService).send("Pathing behavior set to careful");
+        assertThat(result).isEqualTo("Pathing behavior set to careful");
+    }
+
+    @Test
+    void avoidBreakingBlock_shouldCallBotAndReturnConfirmation() {
+        String result = tools.avoidBreakingBlock("minecraft:glass");
+
+        verify(bot).addBlockToAvoid("minecraft:glass");
+        assertThat(result).isEqualTo("Added minecraft:glass to avoid-breaking list");
+    }
+
+    @Test
+    void clearBlockAvoidance_shouldCallBotAndReturnConfirmation() {
+        String result = tools.clearBlockAvoidance();
+
+        verify(bot).clearAvoidedBlocks();
+        assertThat(result).isEqualTo("Cleared all block avoidance rules.");
     }
 }

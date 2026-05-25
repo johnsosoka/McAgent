@@ -251,5 +251,37 @@ public class TestRunner {
                             .build()
             );
         }
+
+        @Override
+        public void setSafetyMode(boolean enabled) {
+            log.info("[MOCK] setSafetyMode({})", enabled);
+        }
+
+        @Override
+        public HealthStatus getHealthStatus() {
+            return new HealthStatus(18.0f, 20.0f, 15, 8);
+        }
+
+        @Override
+        public List<ThreatInfo> getNearbyThreats(int radius) {
+            return List.of(
+                    new ThreatInfo("Creeper", new Location(100, 64, 100), 12.0, "NE")
+            );
+        }
+
+        @Override
+        public void setPathingBehavior(String mode) {
+            log.info("[MOCK] setPathingBehavior({})", mode);
+        }
+
+        @Override
+        public void addBlockToAvoid(String blockType) {
+            log.info("[MOCK] addBlockToAvoid({})", blockType);
+        }
+
+        @Override
+        public void clearAvoidedBlocks() {
+            log.info("[MOCK] clearAvoidedBlocks");
+        }
     }
 }

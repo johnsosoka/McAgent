@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -56,6 +57,12 @@ public class FabricBaritoneBridge implements BotOperations {
             Map.entry("OAK_LOG", Blocks.OAK_LOG),
             Map.entry("BIRCH_LOG", Blocks.BIRCH_LOG),
             Map.entry("SPRUCE_LOG", Blocks.SPRUCE_LOG)
+    );
+
+    private static final Set<String> HOSTILE_MOBS = Set.of(
+            "Creeper", "Zombie", "Skeleton", "Spider", "Enderman", "Witch",
+            "Drowned", "Husk", "Stray", "WitherSkeleton", "Blaze", "Ghast",
+            "PiglinBrute", "Vindicator", "Evoker", "Ravager"
     );
 
     private final IBaritone baritone;
@@ -284,6 +291,150 @@ public class FabricBaritoneBridge implements BotOperations {
             entities.sort((a, b) -> Double.compare(a.getDistance(), b.getDistance()));
             return entities;
         });
+    }
+
+    @Override
+    public void setSafetyMode(boolean enabled) {
+        ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: setSafetyMode({})", enabled);
+            var settings = BaritoneAPI.getSettings();
+            if (enabled) {
+                settings.allowBreak.value = false;
+                settings.allowParkour.value = false;
+                settings.allowSprint.value = false;
+                settings.avoidance.value = true;
+                settings.mobAvoidanceRadius.value = 16;
+                populateCommonAvoidBlocks();
+                notify("Safe mode enabled. I'll be careful.");
+            } else {
+                settings.allowBreak.value = true;
+                settings.allowParkour.value = true;
+                settings.allowSprint.value = true;
+                settings.avoidance.value = false;
+                settings.mobAvoidanceRadius.value = 8;
+                settings.blocksToAvoidBreaking.value.clear();
+                notify("Safe mode disabled. Normal behavior restored.");
+            }
+        });
+    }
+
+    @Override
+    public HealthStatus getHealthStatus() {
+        return ClientThreadExecutor.execute(() -> {
+            var player = Minecraft.getInstance().player;
+            if (player == null) {
+                log.warn("Cannot get health status: player is null");
+                return new HealthStatus(0, 0, 0, 0);
+            }
+            float health = player.getHealth();
+            float maxHealth = player.getMaxHealth();
+            int foodLevel = player.getFoodData().getFoodLevel();
+            int armorValue = player.getArmorValue();
+            return new HealthStatus(health, maxHealth, foodLevel, armorValue);
+        });
+    }
+
+    @Override
+    public List<ThreatInfo> getNearbyThreats(int radius) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null || mc.player == null) {
+                return new ArrayList<ThreatInfo>();
+            }
+            Location botPos = new Location(mc.player.blockPosition().getX(), mc.player.blockPosition().getY(), mc.player.blockPosition().getZ());
+            List<ThreatInfo> threats = new ArrayList<>();
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                String type = entity.getClass().getSimpleName();
+                if (isHostileMob(type)) {
+                    BlockPos pos = entity.blockPosition();
+                    Location loc = new Location(pos.getX(), pos.getY(), pos.getZ());
+                    double dist = botPos.distanceTo(loc);
+                    if (dist <= radius) {
+                        threats.add(new ThreatInfo(type, loc, dist, calculateDirection(botPos, loc)));
+                    }
+                }
+            }
+            threats.sort((a, b) -> Double.compare(a.distance(), b.distance()));
+            return threats;
+        });
+    }
+
+    @Override
+    public void setPathingBehavior(String mode) {
+        ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: setPathingBehavior({})", mode);
+            var settings = BaritoneAPI.getSettings();
+            switch (mode.toLowerCase()) {
+                case "careful" -> {
+                    settings.allowBreak.value = false;
+                    settings.allowParkour.value = false;
+                    settings.allowSprint.value = false;
+                    populateCommonAvoidBlocks();
+                    notify("Pathing behavior set to careful.");
+                }
+                case "aggressive" -> {
+                    settings.allowBreak.value = true;
+                    settings.allowParkour.value = true;
+                    settings.allowSprint.value = true;
+                    settings.blocksToAvoidBreaking.value.clear();
+                    notify("Pathing behavior set to aggressive.");
+                }
+                case "default" -> {
+                    settings.allowBreak.value = true;
+                    settings.allowParkour.value = true;
+                    settings.allowSprint.value = true;
+                    settings.blocksToAvoidBreaking.value.clear();
+                    notify("Pathing behavior set to default.");
+                }
+                default -> log.warn("Unknown pathing behavior mode: {}", mode);
+            }
+        });
+    }
+
+    @Override
+    public void addBlockToAvoid(String blockType) {
+        ClientThreadExecutor.execute(() -> {
+            Block block = resolveBlock(blockType);
+            if (block != null) {
+                BaritoneAPI.getSettings().blocksToAvoidBreaking.value.add(block);
+                log.info("Added block to avoid-breaking list: {}", blockType);
+            } else {
+                log.warn("Could not find block: {}", blockType);
+            }
+        });
+    }
+
+    @Override
+    public void clearAvoidedBlocks() {
+        ClientThreadExecutor.execute(() -> {
+            BaritoneAPI.getSettings().blocksToAvoidBreaking.value.clear();
+            log.info("Cleared all block avoidance rules.");
+        });
+    }
+
+    private boolean isHostileMob(String type) {
+        return HOSTILE_MOBS.contains(type);
+    }
+
+    private void populateCommonAvoidBlocks() {
+        var avoidList = BaritoneAPI.getSettings().blocksToAvoidBreaking.value;
+        avoidList.add(Blocks.GLASS);
+        avoidList.add(Blocks.GLASS_PANE);
+        avoidList.add(Blocks.OAK_PLANKS);
+        avoidList.add(Blocks.BIRCH_PLANKS);
+        avoidList.add(Blocks.SPRUCE_PLANKS);
+        avoidList.add(Blocks.JUNGLE_PLANKS);
+        avoidList.add(Blocks.ACACIA_PLANKS);
+        avoidList.add(Blocks.DARK_OAK_PLANKS);
+        avoidList.add(Blocks.OAK_LOG);
+        avoidList.add(Blocks.BIRCH_LOG);
+        avoidList.add(Blocks.SPRUCE_LOG);
+        avoidList.add(Blocks.JUNGLE_LOG);
+        avoidList.add(Blocks.ACACIA_LOG);
+        avoidList.add(Blocks.DARK_OAK_LOG);
+        avoidList.add(Blocks.STONE_BRICKS);
+        avoidList.add(Blocks.BRICKS);
+        avoidList.add(Blocks.WHITE_WOOL);
     }
 
     private String calculateDirection(Location from, Location to) {

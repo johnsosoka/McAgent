@@ -252,4 +252,54 @@ public class MinecraftTools {
         chatService.send(message);
         return "Sent: " + message;
     }
+
+    @Tool("Enable or disable safe mode. Safe mode prevents block breaking, disables parkour/sprint, enables mob avoidance, and allows door usage.")
+    public String setSafetyMode(@P("true to enable safe mode, false for normal") boolean enabled) {
+        log.info("Tool: setSafetyMode({})", enabled);
+        bot.setSafetyMode(enabled);
+        if (enabled) {
+            chatService.send("Safe mode enabled. I'll be careful.");
+            return "Safe mode enabled";
+        } else {
+            chatService.send("Safe mode disabled. Normal behavior restored.");
+            return "Safe mode disabled";
+        }
+    }
+
+    @Tool("Report the bot's current health, hunger, armor, and any nearby threats.")
+    public String getStatusReport() {
+        log.info("Tool: getStatusReport");
+        var health = bot.getHealthStatus();
+        var threats = bot.getNearbyThreats(32);
+        String threatStr = threats.isEmpty()
+                ? "none"
+                : threats.stream().map(Object::toString).collect(Collectors.joining(", "));
+        return "Status: " + health + ". Nearby threats: " + threatStr;
+    }
+
+    @Tool("Set pathing behavior mode. 'careful' avoids breaking blocks and uses doors. 'aggressive' allows breaking for speed. 'default' restores normal settings.")
+    public String setPathingBehavior(@P("Behavior mode: careful, aggressive, or default") String mode) {
+        log.info("Tool: setPathingBehavior({})", mode);
+        String normalized = mode.toLowerCase();
+        if (!normalized.equals("careful") && !normalized.equals("aggressive") && !normalized.equals("default")) {
+            return "Invalid mode: " + mode + ". Use careful, aggressive, or default.";
+        }
+        bot.setPathingBehavior(normalized);
+        chatService.send("Pathing behavior set to " + normalized);
+        return "Pathing behavior set to " + normalized;
+    }
+
+    @Tool("Add a block type to the avoid-breaking list. The bot will path around these blocks instead of breaking them. Examples: minecraft:glass, minecraft:oak_planks")
+    public String avoidBreakingBlock(@P("Block ID to avoid breaking, e.g. minecraft:glass") String blockType) {
+        log.info("Tool: avoidBreakingBlock({})", blockType);
+        bot.addBlockToAvoid(blockType);
+        return "Added " + blockType + " to avoid-breaking list";
+    }
+
+    @Tool("Clear all custom block avoidance rules and restore defaults.")
+    public String clearBlockAvoidance() {
+        log.info("Tool: clearBlockAvoidance");
+        bot.clearAvoidedBlocks();
+        return "Cleared all block avoidance rules.";
+    }
 }

@@ -45,6 +45,11 @@ public interface Assistant {
             - scanForPlayers(radius) — list all nearby players within radius
             - scanForEntities(entityType, radius) — scan for mobs or animals of a specific type
             - sendMessage(text) — send a chat message to the player (use for progress updates, confirmations, questions)
+            - setSafetyMode(enabled) — enable/disable safe mode (no breaking, no parkour/sprint, mob avoidance)
+            - getStatusReport() — report bot health, hunger, armor, and nearby threats
+            - setPathingBehavior(mode) — set careful, aggressive, or default pathing behavior
+            - avoidBreakingBlock(blockType) — add a block to the avoid-breaking list
+            - clearBlockAvoidance() — clear all block avoidance rules
             </available_tools>
 
             <entity_scanning_guidance>
@@ -67,6 +72,15 @@ public interface Assistant {
             Do NOT send a separate "I'm starting to..." message — it may arrive after the bot has already arrived.
             Only send a message via sendMessage if you need to ask a question, report a problem, or confirm a completed multi-step task.
             </timing_guidance>
+
+            <safety_guidance>
+            - setSafetyMode(true) enables overall cautious behavior: no block breaking, no parkour/sprint, mob avoidance, and door usage.
+            - setPathingBehavior("careful") is for fine-tuned pathing control without breaking blocks or sprinting, while still using doors.
+            - avoidBreakingBlock and clearBlockAvoidance protect specific block types from being broken.
+            - getStatusReport checks the bot's health and scans for nearby hostile mobs.
+            - When the player says "be careful" or "don't break anything", use setSafetyMode(true) or setPathingBehavior("careful").
+            - When the player says "go inside" and a house is nearby, use setPathingBehavior("careful") first to avoid breaking windows.
+            </safety_guidance>
 
             <output_format>
             You can call one or more tools in a single turn. After tools execute, provide a concise conversational response.
