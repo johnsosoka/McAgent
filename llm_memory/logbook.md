@@ -407,7 +407,7 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [x] Add system prompt guidance for entity scanning tools
 - [x] Core unit tests
 - [x] Fabric integration validation (in-game test) — PASSED
-- [ ] Merge to `main` (PR opened)
+- [x] Merge to `main` — PR #11 merged, Issue #4 closed
 
 ### Validation guide
 
@@ -419,4 +419,58 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 
 ---
 
-*Next in queue after #4: Issue #5 — Advanced Pathing Goals (`GoalXZ`, `GoalYLevel`, `GoalNear`, `GoalInverted`).*
+---
+
+## 2026-05-25 — Session: Sprint Planning — Issue #5 Advanced Pathing Goals
+
+**Branch:** `issue/5-advanced-pathing-goals`
+**Issue:** [#5](https://github.com/johnsosoka/McAgent/issues/5)
+**Status:** Sprint started, branch cut from latest `main`
+
+### What we did
+
+1. **Repo audit** — Verified `main` is clean and up-to-date with `origin/main`. PR #11 (Issue #4) fully merged.
+2. **Issue triage** — Reviewed all 5 open enhancement issues (#5–#8, #10). Confirmed #5 as the logical next sprint based on:
+   - The planned roadmap (#3 → #4 → **#5** → #7 → #6 → #8)
+   - #6 (safety/fleeing) is blocked until `GoalInverted` is built in #5
+   - Pure Baritone API — clean wiring of goal classes, no new Minecraft client APIs needed
+   - Low risk (movement commands only, no block placement or inventory changes)
+3. **Branch created** — `issue/5-advanced-pathing-goals` cut from latest `main`.
+
+### Goals for this sprint
+
+- `navigateToXZ(int x, int z)` — path to surface X,Z coordinates (any Y level)
+- `navigateToYLevel(int y)` — path to a specific depth (strip mining)
+- `exploreNear(Location center, int radius)` — explore within radius of a point
+- `fleeFrom(Location threat, int safeDistance)` — retreat using `GoalInverted`
+- `navigateToNearest(List<Location> candidates)` — path to nearest of multiple waypoints (optional stretch)
+
+### Interface targets
+
+**BotOperations.java:**
+- `PathResult navigateToXZ(int x, int z)`
+- `PathResult navigateToYLevel(int y)`
+- `PathResult exploreNear(Location center, int radius)`
+- `PathResult fleeFrom(Location threat, int safeDistance)`
+- `PathResult navigateToNearest(List<Location> candidates)` (stretch)
+
+**MinecraftTools.java:**
+- `@Tool navigateToSurface(x, z)` — "Navigate to surface X,Z coordinates"
+- `@Tool goToDepth(y)` — "Go to a specific Y level, useful for strip mining"
+- `@Tool exploreArea(x, y, z, radius)` — "Explore within a radius of a center point"
+- `@Tool fleeFrom(x, y, z, distance)` — "Flee from specific coordinates to maintain safe distance"
+
+### Remaining work
+
+- [ ] Add methods to `BotOperations` interface
+- [ ] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
+- [ ] Add `@Tool` methods to `MinecraftTools`
+- [ ] Update `Assistant` system prompt
+- [ ] Update `TestRunner` mock
+- [ ] Unit tests
+- [ ] Fabric integration validation (in-game test)
+- [ ] Merge to `main` (pending human approval)
+
+---
+
+*Next in queue after #5: Issue #7 — Inventory Queries (`checkInventory`, `getInventorySummary`).*

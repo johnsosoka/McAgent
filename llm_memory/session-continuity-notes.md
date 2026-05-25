@@ -1,37 +1,38 @@
 # McAgent — Session Continuity Notes
 
 **Date:** 2026-05-25
-**Branch:** `issue/4-player-entity-scanning`
-**Status:** Sprint #4 complete — validated in-game, PR opened
+**Branch:** `issue/5-advanced-pathing-goals`
+**Status:** Sprint #5 started — Issue #4 merged to main
 
 ---
 
 ## Current State
 
-Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** via PR #9.
+Issue #3 (Message Queuing) and #4 (Player/Entity Scanning) are **both complete and merged to `main`**.
 
 ### What Works (validated in-game)
 - ✅ Message queuing (`BotEventQueue`) with priority scheduling
 - ✅ Framework throttling & deduplication (`FrameworkMessageBuffer`)
-- ✅ Thread safety via `ClientThreadExecutor` — all Baritone calls dispatched to client thread
+- ✅ Thread safety via `ClientThreadExecutor`
 - ✅ `.env` loading from Minecraft config directory (`EnvLoader`)
-- ✅ Player context injection with pronoun resolution (`getPlayerPosition()`)
+- ✅ Player context injection with pronoun resolution
 - ✅ Immediate tool chat feedback (no LLM latency)
-- ✅ Disconnect debounce (3s) — no false shutdowns on dimension changes
+- ✅ Disconnect debounce (3s)
 - ✅ NPE hardening after shutdown
-- ✅ All 20 core tests passing
+- ✅ Player / entity scanning (`locatePlayer`, `scanForPlayers`, `scanForEntities`)
+- ✅ 8-sector compass direction calculation
+- ✅ All 26 core tests passing
 - ✅ Shadow JAR builds successfully
-- ✅ Clean in-game validation: `come here`, `stop following`, `what is my location`
 
 ### Open Issues (backlog)
 | Issue | Title | Priority | Blockers |
 |-------|-------|----------|----------|
-| #4 | Player / Entity Scanning | **Complete** | None |
-| #5 | Advanced Pathing Goals | Pending #4 | #4 (fleeing needs entity location) |
-| #6 | Safety Mode & Health Monitoring | Pending #4, #5 | #4 (nearby threats), #5 (GoalInverted) |
-| #7 | Inventory Queries | Pending #5 | None (can be done anytime) |
+| #4 | Player / Entity Scanning | **Merged** | None |
+| #5 | Advanced Pathing Goals | **Current sprint** | None |
+| #6 | Safety Mode & Health Monitoring | Pending #5 | #5 (`fleeFrom` needs `GoalInverted`) |
+| #7 | Inventory Queries | Can be parallel | None |
 | #8 | Building / Placement | Pending #6 | #6 (safety confirmation) |
-| #10 | Background Observation Loop | Future | Needs #4–#8 capabilities to be useful |
+| #10 | Background Observation Loop | Future | Needs #5–#8 capabilities |
 
 ### Architecture Decisions (unchanged)
 - Tool-based architecture: `Assistant.chat()` returns `String`, LangChain4j auto-discovers `@Tool` methods
@@ -41,51 +42,49 @@ Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** 
 
 ---
 
-## Active Sprint: Issue #4 — Player / Entity Scanning
+## Active Sprint: Issue #5 — Advanced Pathing Goals
 
-**Branch:** `issue/4-player-entity-scanning`
-**Commit:** `c7e3923`
+**Branch:** `issue/5-advanced-pathing-goals`
 
-### Implementation Status
-- ✅ `BotOperations` interface — 3 new methods defined
-- ✅ `PlayerInfo` / `EntityInfo` DTOs — immutable Lombok builders
-- ✅ `FabricBaritoneBridge` — all methods wrapped in `ClientThreadExecutor.execute()`
-- ✅ `MinecraftTools` — 3 new `@Tool` methods with proper `@P` annotations
-- ✅ `Assistant` system prompt — updated with new tools + entity scanning guidance
-- ✅ `TestRunner` mock — implements new interface methods
-- ✅ `MinecraftToolsTest` — 6 unit tests (found / not-found for each tool)
-- ✅ Build & tests — 26 tests passing, core + fabric-mod compile green
-- ✅ Code review — passed (direction formula bug caught and fixed)
+### Goals
+- `navigateToXZ(x, z)` — path to surface coordinates (any Y)
+- `navigateToYLevel(y)` — path to specific depth (strip mining)
+- `exploreNear(center, radius)` — explore within radius
+- `fleeFrom(threat, safeDistance)` — retreat using `GoalInverted`
+- `navigateToNearest(candidates)` — nearest of multiple waypoints (stretch)
 
-### Validation results
-- [x] In-game validation PASSED (`locatePlayer`, `scanForPlayers`, `scanForEntities` all working)
-- [ ] Human approval for merge to `main`
-
-### Interface Targets (all implemented)
+### Interface Targets
 **BotOperations.java:**
 ```java
-PlayerInfo findPlayer(String playerName);
-List<PlayerInfo> getNearbyPlayers(int radius);
-List<EntityInfo> getNearbyEntities(String entityType, int radius);
+PathResult navigateToXZ(int x, int z);
+PathResult navigateToYLevel(int y);
+PathResult exploreNear(Location center, int radius);
+PathResult fleeFrom(Location threat, int safeDistance);
+PathResult navigateToNearest(List<Location> candidates);
 ```
 
 **MinecraftTools.java:**
 ```java
-@Tool("Locate a player by name and report coordinates, distance, and direction")
-public String locatePlayer(@P("Player name") String playerName) { ... }
+@Tool("Navigate to surface X,Z coordinates (any Y level)")
+public String navigateToSurface(@P("X coordinate") int x, @P("Z coordinate") int z) { ... }
 
-@Tool("List nearby players within a radius")
-public String scanForPlayers(@P("Search radius in blocks") int radius) { ... }
+@Tool("Go to a specific Y level, useful for strip mining")
+public String goToDepth(@P("Target Y level") int y) { ... }
 
-@Tool("Scan for nearby mobs or animals of a specific type")
-public String scanForEntities(@P("Entity type, e.g. Creeper, Zombie, Pig, Cow") String entityType,
-                              @P("Search radius in blocks") int radius) { ... }
+@Tool("Explore within a radius of a center point")
+public String exploreArea(@P("Center X") int x, @P("Center Y") int y, @P("Center Z") int z,
+                          @P("Radius in blocks") int radius) { ... }
+
+@Tool("Flee from specific coordinates to maintain a safe distance")
+public String fleeFrom(@P("Threat X") int x, @P("Threat Y") int y, @P("Threat Z") int z,
+                       @P("Safe distance in blocks") int distance) { ... }
 ```
 
-### Safety Notes
-- Read-only operations — no movement triggered
-- Uses `Minecraft.getInstance().level.entitiesForRendering()` for scanning
-- Direction calculated with 8-sector compass (N, NE, E, SE, S, SW, W, NW)
+### Technical Notes
+- Pure Baritone API — import goal classes (`GoalXZ`, `GoalYLevel`, `GoalNear`, `GoalInverted`, `GoalComposite`)
+- All implementations wrapped in `ClientThreadExecutor.execute()`
+- `fleeFrom` uses `GoalInverted(new GoalBlock(threatPos))` or safe-direction vector
+- `exploreNear` uses `GoalNear` or `GoalXZ` with random offset within radius
 
 ---
 
@@ -117,4 +116,4 @@ cat ~/Library/Application\ Support/minecraft/logs/latest.log | grep -i 'mcagent\
 
 ---
 **Prepared by:** AI Lead (OpenCode)
-**For:** John Sosoka — Issue #4 sprint continuation
+**For:** John Sosoka — Issue #5 sprint continuation
