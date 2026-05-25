@@ -1671,6 +1671,31 @@ public class DeathRespawnHandler {
 }
 ```
 
+## 8. McAgent-Specific Extensions
+
+### 8.1 Player Position Query (Non-Baritone)
+
+While Baritone's `IFollowProcess` can follow an entity, there is **no standalone API to query a player's current coordinates without following them**. McAgent implements this via direct Minecraft client API access:
+
+```java
+// Scan loaded world entities to find a player by name
+Minecraft mc = Minecraft.getInstance();
+for (Entity entity : mc.level.entitiesForRendering()) {
+    if (entity instanceof Player p && p.getName().getString().equalsIgnoreCase(playerName)) {
+        BlockPos pos = p.blockPosition();
+        return Optional.of(new Location(pos.getX(), pos.getY(), pos.getZ()));
+    }
+}
+return Optional.empty();
+```
+
+**API:** `BotOperations.getPlayerPosition(String playerName)` → `Optional<Location>`
+
+**Use cases:**
+- "Where am I?" → `getPlayerPosition(currentSpeaker)`
+- "Where is Steve?" → `getPlayerPosition("Steve")`
+- "Come here" → `navigateTo(getPlayerPosition(currentSpeaker))`
+
 ### 7.4 World Loading/Unloading
 
 ```java

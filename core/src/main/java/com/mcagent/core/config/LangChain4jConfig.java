@@ -67,9 +67,13 @@ public class LangChain4jConfig {
         if (envKey != null && !envKey.isBlank()) {
             return envKey;
         }
+        String propKey = System.getProperty("FIREWORKS_API_KEY");
+        if (propKey != null && !propKey.isBlank()) {
+            return propKey;
+        }
         throw new IllegalStateException(
-                "Fireworks API key not configured. Set 'llm.fireworks.api-key' in application.yml " +
-                        "or the FIREWORKS_API_KEY environment variable."
+                "Fireworks API key not configured. Set 'llm.fireworks.api-key' in application.yml, " +
+                        "the FIREWORKS_API_KEY environment variable, or add it to .env / mc-agent.env."
         );
     }
 }

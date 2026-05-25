@@ -1,31 +1,25 @@
 package com.mcagent.fabric;
 
-import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.fabric.queue.BotEventQueue;
+import com.mcagent.fabric.queue.EventPriority;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.minecraft.client.Minecraft;
 
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Handles incoming Minecraft chat messages and delegates to the LLM service.
+ * Handles incoming Minecraft chat messages and enqueues them for LLM processing.
  * Replaces the Forge ChatEventHandler with Fabric event registration.
  */
 @Slf4j
 @RequiredArgsConstructor
 public class FabricChatHandler {
 
-    private final LangChain4jService langChainService;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "mc-agent-chat");
-        t.setDaemon(true);
-        return t;
-    });
+    private final BotEventQueue botEventQueue;
 
     private static final Pattern CHAT_PATTERN = Pattern.compile("^<(\\w+)>\\s*(.+)");
     private static final Pattern ALTERNATIVE_PATTERN = Pattern.compile("^(\\w+):\\s*(.+)");
@@ -54,28 +48,27 @@ public class FabricChatHandler {
             return;
         }
 
-        executor.submit(() -> {
-            try {
-                log.info("Processing command from {}: {}", playerName, command);
-                // LangChain4j automatically invokes tools (navigateTo, sendMessage, etc.)
-                // during this call. The returned String is the LLM's conversational reply.
-                String response = langChainService.processInput(command, playerName);
-
-                if (response != null && !response.isBlank()) {
-                    FabricChatSender.send(response);
-                }
-            } catch (Exception e) {
-                log.error("Error processing chat command", e);
-                FabricChatSender.send("Sorry, something went wrong. Check the logs.");
-            }
-        });
+        EventPriority priority = resolvePriority(command);
+        botEventQueue.enqueueCommand(playerName, command, priority);
     }
 
     /**
-     * Shut down the background executor. Called on disconnect.
+     * Resolve command priority. Cancel/stop commands are treated as high priority.
+     */
+    private EventPriority resolvePriority(String command) {
+        String lower = command.toLowerCase();
+        if (lower.contains("cancel") || lower.contains("stop") || lower.contains("halt")) {
+            return EventPriority.CANCEL;
+        }
+        return EventPriority.NORMAL;
+    }
+
+    /**
+     * Shut down the chat handler. The lifecycle owner (McAgentFabricMod) is
+     * responsible for shutting down the underlying {@link BotEventQueue}.
      */
     public void shutdown() {
-        executor.shutdownNow();
+        // No-op: queue lifecycle is managed by McAgentFabricMod to avoid double-shutdown.
     }
 
     /**

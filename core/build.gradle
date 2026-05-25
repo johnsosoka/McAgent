@@ -46,6 +46,9 @@ dependencies {
     runtimeOnly 'com.h2database:h2:2.3.232'
     runtimeOnly 'org.postgresql:postgresql:42.7.4'
 
+    // .env file loading
+    implementation 'io.github.cdimascio:java-dotenv:5.2.2'
+
     // Utilities
     implementation 'com.google.guava:guava:33.5.0-jre'
     implementation 'org.apache.httpcomponents.client5:httpclient5:5.4.1'
