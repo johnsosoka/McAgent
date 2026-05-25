@@ -7,7 +7,13 @@ import baritone.api.event.events.PathEvent;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
+import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.pathing.goals.GoalComposite;
+import baritone.api.pathing.goals.GoalInverted;
+import baritone.api.pathing.goals.GoalNear;
+import baritone.api.pathing.goals.GoalXZ;
+import baritone.api.pathing.goals.GoalYLevel;
 import baritone.api.process.ICustomGoalProcess;
 import baritone.api.process.IFollowProcess;
 import baritone.api.process.IMineProcess;
@@ -112,6 +118,88 @@ public class FabricBaritoneBridge implements BotOperations {
                 .message("Use navigateTo(int, int, int) with resolved coordinates.")
                 .type(PathResult.PathResultType.ERROR)
                 .build();
+    }
+
+    @Override
+    public PathResult navigateToXZ(int x, int z) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: navigateToXZ({}, {})", x, z);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalXZ(x, z));
+            notify("Navigating to surface coordinates (" + x + ", " + z + ")");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Pathing to surface (" + x + ", " + z + ")")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult navigateToYLevel(int y) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: navigateToYLevel({})", y);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalYLevel(y));
+            notify("Going to Y=" + y);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Going to Y=" + y)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult exploreNear(Location center, int radius) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: exploreNear({}, {})", center, radius);
+            BlockPos pos = new BlockPos(center.x(), center.y(), center.z());
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(pos, radius));
+            notify("Exploring within " + radius + " blocks of " + center);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Exploring within " + radius + " blocks of " + center)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult fleeFrom(Location threat, int safeDistance) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: fleeFrom({}, {})", threat, safeDistance);
+            Location bot = getCurrentPosition();
+            double dx = bot.x() - threat.x();
+            double dz = bot.z() - threat.z();
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            double scale = safeDistance / Math.max(dist, 1.0);
+            int retreatX = (int) (bot.x() + dx * scale);
+            int retreatZ = (int) (bot.z() + dz * scale);
+            BlockPos retreatPos = new BlockPos(retreatX, bot.y(), retreatZ);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(retreatPos));
+            notify("Fleeing to maintain " + safeDistance + " blocks from threat");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Fleeing from " + threat + ", maintaining " + safeDistance + " blocks")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult navigateToNearest(List<Location> candidates) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: navigateToNearest({} candidates)", candidates.size());
+            Goal[] goals = candidates.stream()
+                    .map(loc -> new GoalBlock(new BlockPos(loc.x(), loc.y(), loc.z())))
+                    .toArray(Goal[]::new);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalComposite(goals));
+            notify("Navigating to nearest of " + candidates.size() + " locations");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Navigating to nearest of " + candidates.size() + " locations")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
     }
 
     @Override

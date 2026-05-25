@@ -55,6 +55,36 @@ public interface BotOperations {
     List<EntityInfo> getNearbyEntities(String entityType, int radius);
 
     /**
+     * Navigate to surface X,Z coordinates (any Y level).
+     * Uses Baritone's GoalXZ.
+     */
+    PathResult navigateToXZ(int x, int z);
+
+    /**
+     * Navigate to a specific Y level (any X,Z).
+     * Useful for strip mining. Uses Baritone's GoalYLevel.
+     */
+    PathResult navigateToYLevel(int y);
+
+    /**
+     * Explore within a given radius of a center point.
+     * Uses Baritone's GoalNear or GoalXZ with random offset.
+     */
+    PathResult exploreNear(Location center, int radius);
+
+    /**
+     * Retreat from a specific coordinate to maintain a safe distance.
+     * Uses Baritone's GoalInverted.
+     */
+    PathResult fleeFrom(Location threat, int safeDistance);
+
+    /**
+     * Navigate to the nearest of multiple candidate locations.
+     * Uses Baritone's GoalComposite.
+     */
+    PathResult navigateToNearest(List<Location> candidates);
+
+    /**
      * Register a callback that receives human-readable progress/status messages
      * from the bot (e.g. "Arrived at destination", "Mining complete").
      */
