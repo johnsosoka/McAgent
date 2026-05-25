@@ -31,6 +31,7 @@ Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** 
 | #6 | Safety Mode & Health Monitoring | Pending #4, #5 | #4 (nearby threats), #5 (GoalInverted) |
 | #7 | Inventory Queries | Pending #5 | None (can be done anytime) |
 | #8 | Building / Placement | Pending #6 | #6 (safety confirmation) |
+| #10 | Background Observation Loop | Future | Needs #4–#8 capabilities to be useful |
 
 ### Architecture Decisions (unchanged)
 - Tool-based architecture: `Assistant.chat()` returns `String`, LangChain4j auto-discovers `@Tool` methods

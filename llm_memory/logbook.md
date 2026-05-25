@@ -408,6 +408,10 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [ ] Fabric integration validation (in-game test)
 - [ ] Merge to `main` (pending human approval)
 
+### Related ticket filed
+
+- **Issue #10** — [Background observation loop](https://github.com/johnsosoka/McAgent/issues/10): Architectural planning ticket for autonomous threat detection and proactive agent behavior. Filed during sprint to capture the idea while #4 scanning primitives are fresh. Will be actionable after #5–#8 build out more capabilities.
+
 ---
 
 *Next in queue after #4: Issue #5 — Advanced Pathing Goals (`GoalXZ`, `GoalYLevel`, `GoalNear`, `GoalInverted`).*
