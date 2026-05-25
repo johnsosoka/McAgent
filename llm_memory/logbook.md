@@ -339,13 +339,73 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - `@Tool scanForPlayers`
 - `@Tool scanForEntities`
 
+---
+
+## 2026-05-25 — Session: Implement Issue #4 — Player / Entity Scanning
+
+**Branch:** `issue/4-player-entity-scanning`
+**Issue:** [#4](https://github.com/johnsosoka/McAgent/issues/4)
+**Status:** Implementation complete, code review passed, build green
+
+### What we did
+
+1. **Scaffolded core interfaces and DTOs:**
+   - `PlayerInfo.java` — immutable builder DTO: name, location, distance, direction
+   - `EntityInfo.java` — immutable builder DTO: type, location, distance, direction
+   - `BotOperations.java` — added `findPlayer()`, `getNearbyPlayers()`, `getNearbyEntities()`
+
+2. **Delegated implementation to senior engineer agent** — full brief at `llm_memory/issue-4-implementation-brief.md`.
+
+3. **Implemented in `FabricBaritoneBridge`:**
+   - All 3 methods wrapped in `ClientThreadExecutor.execute()` for thread safety
+   - `findPlayer()` — scans loaded entities, matches `Player` by name, computes distance + direction
+   - `getNearbyPlayers()` — collects players within radius, excludes bot itself, sorts by distance
+   - `getNearbyEntities()` — filters by `entity.getClass().getSimpleName()`, sorts by distance
+   - `calculateDirection()` — 8-sector compass (N, NE, E, SE, S, SW, W, NW) using Minecraft yaw convention
+
+4. **Added `@Tool` methods to `MinecraftTools`:**
+   - `locatePlayer(playerName)` — "Player X is at (Y), Z blocks D"
+   - `scanForPlayers(radius)` — one line per player
+   - `scanForEntities(entityType, radius)` — one line per mob/animal
+
+5. **Updated `Assistant.java` system prompt:**
+   - Added 3 new tools to `<available_tools>`
+   - Added `<entity_scanning_guidance>` explaining read-only semantics
+
+6. **Updated test layer:**
+   - `TestRunner.MockBotOperations` — implements new methods with mock data
+   - `MinecraftToolsTest.java` — 6 unit tests (found / not-found for each tool) using Mockito
+
+7. **Code review findings & fixes:**
+   - **Critical:** Fixed inverted direction calculation (`atan2(-dx, dz)` → `atan2(dx, -dz)`) to match Minecraft coordinate system
+   - **Style:** Removed redundant diamond-type arguments (`new ArrayList<>()`)
+   - **Mock:** Parameterized `getNearbyEntities` mock to return the requested entity type
+
+### Files changed / created
+
+- `core/src/main/java/com/mcagent/core/model/PlayerInfo.java` — New.
+- `core/src/main/java/com/mcagent/core/model/EntityInfo.java` — New.
+- `core/src/main/java/com/mcagent/core/service/BotOperations.java` — Added 3 methods.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricBaritoneBridge.java` — Implemented 3 methods + `calculateDirection()`.
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — Added 3 `@Tool` methods.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Updated system prompt.
+- `core/src/test/java/com/mcagent/core/TestRunner.java` — Mock implementations.
+- `core/src/test/java/com/mcagent/core/tools/MinecraftToolsTest.java` — New. 6 tests.
+- `llm_memory/issue-4-implementation-brief.md` — New. Agent brief.
+
+### Build & test results
+
+- `:core:compileJava` — SUCCESS
+- `:core:test` — **26 tests PASSED** (20 existing + 6 new)
+- `:fabric-mod:compileJava` — SUCCESS
+
 ### Remaining work
 
-- [ ] Implement entity scanning in `FabricBaritoneBridge`
-- [ ] Add `@Tool` methods to `MinecraftTools`
-- [ ] Add system prompt guidance for entity scanning tools
-- [ ] Core unit tests
-- [ ] Fabric integration validation
+- [x] Implement entity scanning in `FabricBaritoneBridge`
+- [x] Add `@Tool` methods to `MinecraftTools`
+- [x] Add system prompt guidance for entity scanning tools
+- [x] Core unit tests
+- [ ] Fabric integration validation (in-game test)
 - [ ] Merge to `main` (pending human approval)
 
 ---

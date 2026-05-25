@@ -5,6 +5,8 @@ import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.LocationType;
 import com.mcagent.core.memory.PlayerNoteService;
 import com.mcagent.core.memory.VectorMemoryService;
+import com.mcagent.core.model.EntityInfo;
+import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.BotOperations.Location;
 import com.mcagent.core.service.ChatService;
@@ -203,6 +205,44 @@ public class MinecraftTools {
         var pos = bot.getPlayerPosition(playerName);
         return pos.map(loc -> playerName + " is at " + loc)
                 .orElse("I can't see " + playerName + " right now. They may be out of range or offline.");
+    }
+
+    @Tool("Locate a player by name and report their coordinates, distance, and direction. Only works if the player is loaded.")
+    public String locatePlayer(@P("Player name") String playerName) {
+        log.info("Tool: locatePlayer({})", playerName);
+        PlayerInfo player = bot.findPlayer(playerName);
+        if (player == null) {
+            return "I can't see " + playerName + " right now. They may be out of range or offline.";
+        }
+        return String.format("Player %s is at %s, %.0f blocks %s",
+                player.getName(), player.getLocation(), player.getDistance(), player.getDirection());
+    }
+
+    @Tool("List all nearby players within a radius, with coordinates, distance, and direction")
+    public String scanForPlayers(@P("Search radius in blocks") int radius) {
+        log.info("Tool: scanForPlayers({})", radius);
+        List<PlayerInfo> players = bot.getNearbyPlayers(radius);
+        if (players.isEmpty()) {
+            return "No players found within " + radius + " blocks.";
+        }
+        return players.stream()
+                .map(p -> String.format("Player %s is at %s, %.0f blocks %s",
+                        p.getName(), p.getLocation(), p.getDistance(), p.getDirection()))
+                .collect(Collectors.joining("\n"));
+    }
+
+    @Tool("Scan for nearby mobs or animals of a specific type. Entity type examples: Creeper, Zombie, Pig, Cow, Skeleton, Spider.")
+    public String scanForEntities(@P("Entity type, e.g. Creeper, Zombie, Pig, Cow") String entityType,
+                                  @P("Search radius in blocks") int radius) {
+        log.info("Tool: scanForEntities({}, {})", entityType, radius);
+        List<EntityInfo> entities = bot.getNearbyEntities(entityType, radius);
+        if (entities.isEmpty()) {
+            return "No " + entityType + " found within " + radius + " blocks.";
+        }
+        return entities.stream()
+                .map(e -> String.format("%s at %s, %.0f blocks %s",
+                        e.getType(), e.getLocation(), e.getDistance(), e.getDirection()))
+                .collect(Collectors.joining("\n"));
     }
 
     @Tool("Send a message to the player chat. Use this to report progress, ask questions, or confirm actions during multi-step tasks.")

@@ -1,9 +1,13 @@
 package com.mcagent.core;
 
 import com.mcagent.core.memory.LocationMemoryService;
+import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PathResult;
+import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.tools.MinecraftTools;
+
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -209,6 +213,43 @@ public class TestRunner {
         @Override
         public void setProgressCallback(java.util.function.Consumer<String> callback) {
             // no-op in test mock
+        }
+
+        @Override
+        public PlayerInfo findPlayer(String playerName) {
+            if ("testplayer".equalsIgnoreCase(playerName)) {
+                return PlayerInfo.builder()
+                        .name("testplayer")
+                        .location(new Location(50, 64, 50))
+                        .distance(50.0)
+                        .direction("SE")
+                        .build();
+            }
+            return null;
+        }
+
+        @Override
+        public List<PlayerInfo> getNearbyPlayers(int radius) {
+            return List.of(
+                    PlayerInfo.builder()
+                            .name("testplayer")
+                            .location(new Location(50, 64, 50))
+                            .distance(50.0)
+                            .direction("SE")
+                            .build()
+            );
+        }
+
+        @Override
+        public List<EntityInfo> getNearbyEntities(String entityType, int radius) {
+            return List.of(
+                    EntityInfo.builder()
+                            .type(entityType)
+                            .location(new Location(30, 64, 30))
+                            .distance(30.0)
+                            .direction("NW")
+                            .build()
+            );
         }
     }
 }
