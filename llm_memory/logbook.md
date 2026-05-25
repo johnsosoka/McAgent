@@ -398,6 +398,7 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - `:core:compileJava` — SUCCESS
 - `:core:test` — **26 tests PASSED** (20 existing + 6 new)
 - `:fabric-mod:compileJava` — SUCCESS
+- `:fabric-mod:shadowJar` — SUCCESS, deployed to `~/Library/Application Support/minecraft/mods/`
 
 ### Remaining work
 
@@ -407,6 +408,10 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [x] Core unit tests
 - [ ] Fabric integration validation (in-game test)
 - [ ] Merge to `main` (pending human approval)
+
+### Validation guide
+
+- `llm_memory/issue-4-validation-guide.md` — New. Step-by-step in-game test plan with 10 commands.
 
 ### Related ticket filed
 
