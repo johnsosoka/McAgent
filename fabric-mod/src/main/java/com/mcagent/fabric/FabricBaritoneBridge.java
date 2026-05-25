@@ -14,6 +14,7 @@ import baritone.api.process.IMineProcess;
 import baritone.api.utils.BlockOptionalMetaLookup;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.fabric.queue.ClientThreadExecutor;
 import lombok.extern.slf4j.Slf4j;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -84,14 +85,16 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public PathResult navigateTo(int x, int y, int z) {
-        log.info("Baritone: pathTo({}, {}, {})", x, y, z);
-        baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BlockPos(x, y, z)));
-        notify("Navigating to (" + x + ", " + y + ", " + z + ")");
-        return PathResult.builder()
-                .success(true)
-                .message("Pathing to (" + x + ", " + y + ", " + z + ")")
-                .type(PathResult.PathResultType.SUCCESS)
-                .build();
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: pathTo({}, {}, {})", x, y, z);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(new BlockPos(x, y, z)));
+            notify("Navigating to (" + x + ", " + y + ", " + z + ")");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Pathing to (" + x + ", " + y + ", " + z + ")")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
     }
 
     @Override
@@ -105,65 +108,73 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public PathResult followPlayer(String playerName) {
-        log.info("Baritone: follow({})", playerName);
-        IFollowProcess follow = baritone.getFollowProcess();
-        Predicate<Entity> filter = entity -> entity.getName().getString().equals(playerName);
-        follow.follow(filter);
-        notify("Following player " + playerName);
-        return PathResult.builder()
-                .success(true)
-                .message("Following player " + playerName)
-                .type(PathResult.PathResultType.SUCCESS)
-                .build();
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: follow({})", playerName);
+            IFollowProcess follow = baritone.getFollowProcess();
+            Predicate<Entity> filter = entity -> entity.getName().getString().equals(playerName);
+            follow.follow(filter);
+            notify("Following player " + playerName);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Following player " + playerName)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
     }
 
     @Override
     public PathResult mine(String blockType, int maxBlocks, Integer radius) {
-        log.info("Baritone: mine({}, {}, {})", blockType, maxBlocks, radius);
-        Block block = resolveBlock(blockType);
-        if (block == null) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: mine({}, {}, {})", blockType, maxBlocks, radius);
+            Block block = resolveBlock(blockType);
+            if (block == null) {
+                return PathResult.builder()
+                        .success(false)
+                        .message("Unknown block type: " + blockType)
+                        .type(PathResult.PathResultType.ERROR)
+                        .build();
+            }
+
+            IMineProcess mining = baritone.getMineProcess();
+            BlockOptionalMetaLookup boml = new BlockOptionalMetaLookup(block);
+            mining.mine(maxBlocks, boml);
+            notify("Mining " + blockType + " (up to " + maxBlocks + " blocks)");
+
             return PathResult.builder()
-                    .success(false)
-                    .message("Unknown block type: " + blockType)
-                    .type(PathResult.PathResultType.ERROR)
+                    .success(true)
+                    .message("Mining " + blockType + " (up to " + maxBlocks + ")")
+                    .type(PathResult.PathResultType.SUCCESS)
                     .build();
-        }
-
-        IMineProcess mining = baritone.getMineProcess();
-        BlockOptionalMetaLookup boml = new BlockOptionalMetaLookup(block);
-        mining.mine(maxBlocks, boml);
-        notify("Mining " + blockType + " (up to " + maxBlocks + " blocks)");
-
-        return PathResult.builder()
-                .success(true)
-                .message("Mining " + blockType + " (up to " + maxBlocks + ")")
-                .type(PathResult.PathResultType.SUCCESS)
-                .build();
+        });
     }
 
     @Override
     public void cancel() {
-        log.info("Baritone: cancelEverything");
-        baritone.getPathingBehavior().cancelEverything();
-        baritone.getMineProcess().cancel();
-        baritone.getFollowProcess().cancel();
-        notify("Cancelled current operation.");
+        ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: cancelEverything");
+            baritone.getPathingBehavior().cancelEverything();
+            baritone.getMineProcess().cancel();
+            baritone.getFollowProcess().cancel();
+            notify("Cancelled current operation.");
+        });
     }
 
     @Override
     public void pause() {
-        log.warn("Baritone pause not supported in this API version");
+        ClientThreadExecutor.execute(() -> log.warn("Baritone pause not supported in this API version"));
     }
 
     @Override
     public void resume() {
-        log.warn("Baritone resume not supported in this API version");
+        ClientThreadExecutor.execute(() -> log.warn("Baritone resume not supported in this API version"));
     }
 
     @Override
     public Location getCurrentPosition() {
-        var pos = baritone.getPlayerContext().playerFeet();
-        return new Location(pos.x, pos.y, pos.z);
+        return ClientThreadExecutor.execute(() -> {
+            var pos = baritone.getPlayerContext().playerFeet();
+            return new Location(pos.x, pos.y, pos.z);
+        });
     }
 
     void onClientTick() {
@@ -231,7 +242,9 @@ public class FabricBaritoneBridge implements BotOperations {
 
     private void notify(String message) {
         log.info("[Progress] {}", message);
-        progressCallback.accept(message);
+        if (progressCallback != null) {
+            progressCallback.accept(message);
+        }
     }
 
     private Block resolveBlock(String blockType) {
