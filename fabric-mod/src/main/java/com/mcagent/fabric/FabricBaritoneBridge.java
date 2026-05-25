@@ -216,7 +216,7 @@ public class FabricBaritoneBridge implements BotOperations {
         return ClientThreadExecutor.execute(() -> {
             log.info("Baritone: follow({})", playerName);
             IFollowProcess follow = baritone.getFollowProcess();
-            Predicate<Entity> filter = entity -> entity.getName().getString().equals(playerName);
+            Predicate<Entity> filter = entity -> entity.getName().getString().equalsIgnoreCase(playerName);
             follow.follow(filter);
             notify("Following player " + playerName);
             return PathResult.builder()
