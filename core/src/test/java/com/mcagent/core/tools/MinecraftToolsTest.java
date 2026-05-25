@@ -362,4 +362,37 @@ class MinecraftToolsTest {
         verify(bot).clearAvoidedBlocks();
         assertThat(result).isEqualTo("Cleared all block avoidance rules.");
     }
+
+    @Test
+    void checkInventory_shouldReturnHasEnough_whenHasItem() {
+        when(bot.hasItem("minecraft:cobblestone", 32)).thenReturn(true);
+        when(bot.countItem("minecraft:cobblestone")).thenReturn(64);
+
+        String result = tools.checkInventory("minecraft:cobblestone", 32);
+
+        assertThat(result).isEqualTo("You have 64 minecraft:cobblestone (need 32)");
+        verify(bot).hasItem("minecraft:cobblestone", 32);
+        verify(chatService).send("You have 64 minecraft:cobblestone (need 32)");
+    }
+
+    @Test
+    void checkInventory_shouldReturnNotEnough_whenMissing() {
+        when(bot.hasItem("minecraft:diamond", 5)).thenReturn(false);
+        when(bot.countItem("minecraft:diamond")).thenReturn(2);
+
+        String result = tools.checkInventory("minecraft:diamond", 5);
+
+        assertThat(result).isEqualTo("You only have 2 minecraft:diamond (need 5)");
+        verify(bot).hasItem("minecraft:diamond", 5);
+    }
+
+    @Test
+    void getInventorySummary_shouldReturnBotSummary() {
+        when(bot.getInventorySummary()).thenReturn("cobblestone x64, oak_planks x32");
+
+        String result = tools.getInventorySummary();
+
+        assertThat(result).isEqualTo("cobblestone x64, oak_planks x32");
+        verify(bot).getInventorySummary();
+    }
 }

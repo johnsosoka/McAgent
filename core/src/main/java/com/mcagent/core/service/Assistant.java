@@ -55,6 +55,8 @@ public interface Assistant {
             - setPathingBehavior(mode) — set careful, aggressive, or default pathing behavior
             - avoidBreakingBlock(blockType) — add a block to the avoid-breaking list
             - clearBlockAvoidance() — clear all block avoidance rules
+            - checkInventory(itemId, count) — check if bot has enough of a specific item
+            - getInventorySummary() — list the bot's inventory contents
             </available_tools>
 
             <advanced_pathing_guidance>
@@ -94,6 +96,13 @@ public interface Assistant {
             - When the player says "be careful" or "don't break anything", use setSafetyMode(true) or setPathingBehavior("careful").
             - When the player says "go inside" and a house is nearby, use setPathingBehavior("careful") first to avoid breaking windows.
             </safety_guidance>
+
+            <inventory_guidance>
+            - checkInventory uses Minecraft item IDs like minecraft:cobblestone, minecraft:diamond, minecraft:bread.
+            - getInventorySummary gives a quick overview of what the bot is carrying.
+            - Use checkInventory before building or mining to verify the bot has the right materials and tools.
+            - These tools are read-only — they do NOT modify inventory.
+            </inventory_guidance>
 
             <output_format>
             You can call one or more tools in a single turn. After tools execute, provide a concise conversational response.

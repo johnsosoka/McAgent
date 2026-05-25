@@ -30,6 +30,8 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
@@ -620,5 +622,91 @@ public class FabricBaritoneBridge implements BotOperations {
             log.warn("Could not resolve block: {}", blockType);
             return null;
         }
+    }
+
+    @Override
+    public boolean hasItem(String itemId, int count) {
+        return ClientThreadExecutor.execute(() -> {
+            var player = Minecraft.getInstance().player;
+            if (player == null) {
+                log.warn("Cannot check inventory: player is null");
+                return false;
+            }
+            var inv = player.getInventory();
+            String target = itemId.contains(":") ? itemId.toLowerCase() : "minecraft:" + itemId.toLowerCase();
+            int total = 0;
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                ItemStack stack = inv.getItem(i);
+                if (!stack.isEmpty()) {
+                    String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    if (id.equalsIgnoreCase(target)) {
+                        total += stack.getCount();
+                        if (total >= count) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        });
+    }
+
+    @Override
+    public int countItem(String itemId) {
+        return ClientThreadExecutor.execute(() -> {
+            var player = Minecraft.getInstance().player;
+            if (player == null) {
+                log.warn("Cannot check inventory: player is null");
+                return 0;
+            }
+            var inv = player.getInventory();
+            String target = itemId.contains(":") ? itemId.toLowerCase() : "minecraft:" + itemId.toLowerCase();
+            int total = 0;
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                ItemStack stack = inv.getItem(i);
+                if (!stack.isEmpty()) {
+                    String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    if (id.equalsIgnoreCase(target)) {
+                        total += stack.getCount();
+                    }
+                }
+            }
+            return total;
+        });
+    }
+
+    @Override
+    public String getInventorySummary() {
+        return ClientThreadExecutor.execute(() -> {
+            var player = Minecraft.getInstance().player;
+            if (player == null) {
+                log.warn("Cannot get inventory summary: player is null");
+                return "Inventory is empty.";
+            }
+            var inv = player.getInventory();
+            java.util.Map<String, Integer> counts = new java.util.HashMap<>();
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                ItemStack stack = inv.getItem(i);
+                if (!stack.isEmpty()) {
+                    String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    counts.merge(id, stack.getCount(), Integer::sum);
+                }
+            }
+            if (counts.isEmpty()) {
+                return "Inventory is empty.";
+            }
+            var entries = new ArrayList<>(counts.entrySet());
+            entries.sort((a, b) -> Integer.compare(b.getValue(), a.getValue()));
+            int limit = Math.min(entries.size(), 10);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < limit; i++) {
+                var entry = entries.get(i);
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(entry.getKey()).append(" x").append(entry.getValue());
+            }
+            return sb.toString();
+        });
     }
 }

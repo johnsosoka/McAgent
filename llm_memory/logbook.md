@@ -691,4 +691,66 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 
 ---
 
-*Next in queue: Issue #7 — Inventory Queries (`checkInventory`, `getInventorySummary`).*
+## 2026-05-25 — Session: Implement Issue #7 — Inventory Queries
+
+**Branch:** `issue/7-inventory-queries`
+**Issue:** [#7](https://github.com/johnsosoka/McAgent/issues/7)
+**Status:** Implementation complete, build green, all tests passing
+
+### What we did
+
+1. **Scaffolded `BotOperations` interface** — Added 3 new methods:
+   - `hasItem(String itemId, int count)` — checks if bot has at least N of an item
+   - `countItem(String itemId)` — counts total of an item across inventory
+   - `getInventorySummary()` — returns top items, truncated for chat
+
+2. **Delegated implementation to agents** — Full brief at `llm_memory/issue-7-implementation-brief.md`.
+
+3. **Implemented in `FabricBaritoneBridge`:**
+   - All 3 methods wrapped in `ClientThreadExecutor.execute()` for thread safety
+   - Uses Mojmap `Inventory.getContainerSize()` + `getItem(i)` to avoid private field access
+   - Item ID normalization: auto-prefixes `minecraft:` if no namespace provided
+   - `getInventorySummary` scans all slots, aggregates by item ID, sorts by count desc, returns top 10
+
+4. **Added `@Tool` methods to `MinecraftTools`:**
+   - `checkInventory(itemId, count)` — returns "You have X item (need Y)" or "You only have X item (need Y)"
+   - `getInventorySummary()` — returns the summary directly
+   - Both send immediate chat feedback via `chatService.send()`
+
+5. **Updated `Assistant.java` system prompt:**
+   - Added 2 new tools to `<available_tools>`
+   - Added `<inventory_guidance>` section explaining read-only semantics and material verification use cases
+
+6. **Updated test layer:**
+   - `TestRunner.MockBotOperations` — implements all 3 new methods with mock data
+   - `MinecraftToolsTest.java` — 3 unit tests (has enough / not enough / inventory summary)
+
+### Files changed / created
+
+- `core/src/main/java/com/mcagent/core/service/BotOperations.java` — Added 3 methods.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricBaritoneBridge.java` — Implemented 3 methods.
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — Added 2 `@Tool` methods.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Updated system prompt.
+- `core/src/test/java/com/mcagent/core/TestRunner.java` — Mock implementations.
+- `core/src/test/java/com/mcagent/core/tools/MinecraftToolsTest.java` — 3 new tests.
+- `llm_memory/issue-7-implementation-brief.md` — New. Agent brief.
+
+### Build & test results
+
+- `:core:compileJava` — SUCCESS
+- `:core:test` — **44 tests PASSED** (41 existing + 3 new)
+- `:fabric-mod:compileJava` — SUCCESS
+- `:fabric-mod:shadowJar` — SUCCESS
+
+### Remaining work
+
+- [x] Fabric integration validation (in-game test) — PASSED
+- [x] Merge to `main` (pending human approval)
+
+### Validation guide
+
+- `llm_memory/issue-7-validation-guide.md` — Step-by-step in-game test plan.
+
+---
+
+*Next in queue: Issue #8 — Building / Placement (`buildPlatform`, `placeBlock`, `buildSchematic`).*

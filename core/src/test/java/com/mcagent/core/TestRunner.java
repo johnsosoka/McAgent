@@ -333,5 +333,24 @@ public class TestRunner {
         public void clearAvoidedBlocks() {
             log.info("[MOCK] clearAvoidedBlocks");
         }
+
+        @Override
+        public boolean hasItem(String itemId, int count) {
+            log.info("[MOCK] hasItem({}, {})", itemId, count);
+            return List.of("minecraft:cobblestone", "minecraft:oak_planks", "minecraft:bread")
+                    .contains(itemId.toLowerCase());
+        }
+
+        @Override
+        public int countItem(String itemId) {
+            log.info("[MOCK] countItem({})", itemId);
+            return List.of("minecraft:cobblestone", "minecraft:oak_planks", "minecraft:bread")
+                    .contains(itemId.toLowerCase()) ? 64 : 0;
+        }
+
+        @Override
+        public String getInventorySummary() {
+            return "cobblestone x64, oak_planks x32, bread x16, iron_pickaxe x1";
+        }
     }
 }

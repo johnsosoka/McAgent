@@ -26,7 +26,8 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 - ✅ Health monitoring: health, hunger, armor, threat detection
 - ✅ Pathing behavior: careful / aggressive / default modes
 - ✅ Block avoidance: configurable avoid-breaking list
-- ✅ All tests passing
+- ✅ Inventory queries: hasItem, countItem, getInventorySummary (validated in-game)
+- ✅ All tests passing (44)
 - ✅ Shadow JAR builds successfully
 
 ### Open Issues (backlog)
@@ -35,8 +36,8 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 | #4 | Player / Entity Scanning | **Merged** | — |
 | #5 | Advanced Pathing Goals | **Merged** | — |
 | #6 | Safety Mode & Health Monitoring | **Merged** | — |
-| #7 | Inventory Queries | Next sprint | None |
-| #8 | Building / Placement | Pending #7 | #7 (material check) |
+| #7 | Inventory Queries | **Merged** | None |
+| #8 | Building / Placement | Next sprint | None |
 | #10 | Background Observation Loop | Future | Needs #5–#8 capabilities |
 
 ### Architecture Decisions (unchanged)
@@ -48,6 +49,30 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 ---
 
 ## Completed Sprints
+
+### Issue #7 — Inventory Queries (merged)
+**PR:** #13
+
+### Goals
+- `hasItem(itemId, count)` — check if bot has at least N of an item
+- `countItem(itemId)` — count total of an item across inventory
+- `getInventorySummary()` — return top items, truncated for chat
+
+### Interface Targets (all implemented)
+**BotOperations.java:**
+```java
+boolean hasItem(String itemId, int count);
+int countItem(String itemId);
+String getInventorySummary();
+```
+
+**MinecraftTools.java:**
+```java
+@Tool checkInventory(itemId, count)
+@Tool getInventorySummary()
+```
+
+---
 
 ### Issue #6 — Safety Mode & Health Monitoring (merged)
 **PR:** #12

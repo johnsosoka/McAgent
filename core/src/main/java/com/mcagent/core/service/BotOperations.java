@@ -120,6 +120,24 @@ public interface BotOperations {
     void clearAvoidedBlocks();
 
     /**
+     * Check if the bot has at least {@code count} of the given item in inventory.
+     * itemId should be a Minecraft item ID, e.g. "minecraft:cobblestone".
+     */
+    boolean hasItem(String itemId, int count);
+
+    /**
+     * Count the total number of the given item in the bot's inventory.
+     * itemId should be a Minecraft item ID, e.g. "minecraft:cobblestone".
+     */
+    int countItem(String itemId);
+
+    /**
+     * Get a human-readable summary of the bot's inventory.
+     * Should list top items or categories, truncated to fit a chat message.
+     */
+    String getInventorySummary();
+
+    /**
      * Register a callback that receives human-readable progress/status messages
      * from the bot (e.g. "Arrived at destination", "Mining complete").
      */

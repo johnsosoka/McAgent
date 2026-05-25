@@ -387,4 +387,24 @@ public class MinecraftTools {
         bot.clearAvoidedBlocks();
         return "Cleared all block avoidance rules.";
     }
+
+    @Tool("Check if the bot has at least a given count of an item in inventory. Use item IDs like minecraft:cobblestone, minecraft:diamond, minecraft:bread.")
+    public String checkInventory(
+            @P("Item ID, e.g. minecraft:cobblestone") String itemId,
+            @P("Minimum count needed") int count) {
+        log.info("Tool: checkInventory({}, {})", itemId, count);
+        boolean has = bot.hasItem(itemId, count);
+        int actual = bot.countItem(itemId);
+        if (has) {
+            chatService.send("You have " + actual + " " + itemId + " (need " + count + ")");
+            return "You have " + actual + " " + itemId + " (need " + count + ")";
+        }
+        return "You only have " + actual + " " + itemId + " (need " + count + ")";
+    }
+
+    @Tool("Get a summary of the bot's inventory contents")
+    public String getInventorySummary() {
+        log.info("Tool: getInventorySummary");
+        return bot.getInventorySummary();
+    }
 }
