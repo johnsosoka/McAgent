@@ -603,14 +603,81 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 | **aggressive** | true | true | true | false | empty |
 | **default** | true | true | true | true | empty |
 
+---
+
+---
+
+## 2026-05-25 — Session: Implement Issue #6 — Safety Mode & Health Monitoring
+
+**Branch:** `issue/6-safety-mode-health-monitoring`
+**Issue:** [#6](https://github.com/johnsosoka/McAgent/issues/6)
+**Status:** Implementation complete, build green
+
+### What we did
+
+1. **Scaffolded `BotOperations` interface** — Added 6 new methods and 2 records:
+   - `setSafetyMode(boolean)` — toggles mob avoidance, parkour, sprint, block breaking
+   - `getHealthStatus()` — returns `HealthStatus` record with health, maxHealth, foodLevel, armorLevel
+   - `getNearbyThreats(radius)` — scans for 16 hostile mob types, returns `List<ThreatInfo>`
+   - `setPathingBehavior(mode)` — "careful", "aggressive", or "default"
+   - `addBlockToAvoid(blockType)` — adds block to Baritone's avoid-breaking list
+   - `clearAvoidedBlocks()` — clears avoidance rules
+
+2. **Delegated implementation to senior engineer agent** — Full brief at `llm_memory/issue-6-implementation-brief.md`.
+
+3. **Implemented in `FabricBaritoneBridge`:**
+   - All methods wrapped in `ClientThreadExecutor.execute()`
+   - `setSafetyMode` — toggles `allowBreak`, `allowParkour`, `allowSprint`, `avoidance`, `mobAvoidanceRadius`, and populates/clears `blocksToAvoidBreaking`
+   - `getHealthStatus` — reads health, max health, food level, armor value from `Minecraft.getInstance().player`
+   - `getNearbyThreats` — scans entities, filters 16 hostile types (Creeper, Zombie, Skeleton, Spider, Enderman, Witch, Drowned, Husk, Stray, WitherSkeleton, Blaze, Ghast, PiglinBrute, Vindicator, Evoker, Ravager)
+   - `setPathingBehavior` — careful mode avoids breaking + parkour + sprint, populates common avoid blocks; aggressive mode allows everything; default restores Baritone defaults
+   - `addBlockToAvoid` — resolves block ID via existing `resolveBlock()` helper, adds to `blocksToAvoidBreaking`
+   - `clearAvoidedBlocks` — clears the avoid list
+
+4. **Added `@Tool` methods to `MinecraftTools`:**
+   - `setSafetyMode(boolean)` — toggles safe mode with chat confirmation
+   - `getStatusReport()` — reports health + nearby threats (radius 32)
+   - `setPathingBehavior(mode)` — validates and sets careful/aggressive/default
+   - `avoidBreakingBlock(blockType)` — adds block to avoid list
+   - `clearBlockAvoidance()` — clears all avoidance rules
+
+5. **Updated `Assistant.java` system prompt:**
+   - Added 5 new tools to `<available_tools>`
+   - Added `<safety_guidance>` section explaining safe mode, careful pathing, and block avoidance
+
+6. **Updated test layer:**
+   - `TestRunner.MockBotOperations` — implements all 6 new methods
+   - `MinecraftToolsTest.java` — 12 unit tests covering all new tools
+
+7. **Baritone API notes:**
+   - `allowOpenDoors` setting does not exist in Baritone 1.17.0 — omitted from implementation
+   - Settings accessed via `BaritoneAPI.getSettings()` (global settings, not per-baritone)
+   - `mobAvoidanceRadius` is `Integer` type, not `Double`
+
+### Files changed / created
+
+- `core/src/main/java/com/mcagent/core/service/BotOperations.java` — Added 6 methods + 2 records.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricBaritoneBridge.java` — Implemented 6 methods + helpers.
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — Added 5 `@Tool` methods.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Updated system prompt.
+- `core/src/test/java/com/mcagent/core/TestRunner.java` — Mock implementations.
+- `core/src/test/java/com/mcagent/core/tools/MinecraftToolsTest.java` — 12 new tests.
+- `llm_memory/issue-6-implementation-brief.md` — New. Agent brief.
+
+### Build & test results
+
+- `:core:compileJava` — SUCCESS
+- `:core:test` — **32 tests PASSED**
+- `:fabric-mod:compileJava` — SUCCESS
+
 ### Remaining work
 
-- [ ] Add methods to `BotOperations` interface
-- [ ] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
-- [ ] Add `@Tool` methods to `MinecraftTools`
-- [ ] Update `Assistant` system prompt
-- [ ] Update `TestRunner` mock
-- [ ] Unit tests
+- [x] Add methods to `BotOperations` interface
+- [x] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
+- [x] Add `@Tool` methods to `MinecraftTools`
+- [x] Update `Assistant` system prompt
+- [x] Update `TestRunner` mock
+- [x] Unit tests
 - [ ] Fabric integration validation (in-game test)
 - [ ] Merge to `main` (pending human approval)
 
