@@ -22,9 +22,12 @@ public class LangChain4jService {
 
     private final Assistant assistant;
     private final ChatMemory chatMemory;
+    private final BotOperations bot;
 
     /**
      * Process player input through the LLM.
+     * Before the message is sent, a {@code <player_context>} tag is injected
+     * into memory so the model knows who is speaking and where they are.
      * Tools are automatically executed by LangChain4j during the chat.
      *
      * @param playerMessage the message directed at the bot
@@ -34,6 +37,7 @@ public class LangChain4jService {
     public String processInput(String playerMessage, String playerId) {
         log.debug("Processing input from {}: {}", playerId, playerMessage);
         try {
+            injectPlayerContext(playerId);
             return assistant.chat(playerMessage);
         } catch (Exception e) {
             log.error("LLM processing failed", e);
@@ -53,5 +57,14 @@ public class LangChain4jService {
         String tagged = "<framework>" + message + "</framework>";
         log.debug("Injecting framework context: {}", tagged);
         chatMemory.add(UserMessage.from(tagged));
+    }
+
+    private void injectPlayerContext(String playerId) {
+        var pos = bot.getPlayerPosition(playerId);
+        String context = pos
+                .map(loc -> "<player_context>Current player: " + playerId + " at " + loc + "</player_context>")
+                .orElse("<player_context>Current player: " + playerId + " (position unknown — may be out of range)</player_context>");
+        log.debug("Injecting player context: {}", context);
+        chatMemory.add(UserMessage.from(context));
     }
 }

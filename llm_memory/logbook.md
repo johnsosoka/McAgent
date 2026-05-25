@@ -184,4 +184,123 @@ The Spring context successfully booted and the bot was alive, but the user's com
 
 ---
 
-*Next: Restart Minecraft. Use trigger words (`bot`, `agent`, `mcagent`, `hey bot`) in commands. Run the 6 validation checks from `issue-3-validation-guide.md`.*
+---
+
+## 2026-05-25 — Session: Player Context Injection & Pronoun Resolution
+
+**Branch:** `issue/3-message-queuing`
+**Issue:** [#3](https://github.com/johnsosoka/McAgent/issues/3) (continued)
+
+### What we did
+
+**Problem identified from user testing:**
+- `agent what is my location?` → bot reported **its own** coordinates (27, 127, -19) instead of the player's
+- `agent come here` → bot asked "What's your player name?" because it had no concept of "me"
+
+**Root cause:** The LLM received raw player messages with **zero context** about who sent them. `processInput(String playerMessage, String playerId)` received the player name but never injected it into the conversation.
+
+**Three-part fix:**
+
+1. **Player context injection** — `LangChain4jService.processInput()` now calls `injectPlayerContext(playerId)` before `assistant.chat()`. This adds a `<player_context>` message to `ChatMemory` containing the player's name and their current coordinates (looked up via `BotOperations.getPlayerPosition()`).
+
+2. **`getPlayerPosition()` tool** — New method in `BotOperations` / `FabricBaritoneBridge` / `MinecraftTools` that scans loaded world entities to find a player by name and return their coordinates. This is a preview of issue #4 functionality.
+
+3. **System prompt pronoun resolution** — Updated `Assistant` `@SystemMessage` to explain:
+   - `<player_context>` tags identify the current speaker
+   - "my" / "me" / "I" = the human player in context
+   - "your" / "you" = the bot itself
+   - When asked "where am I?", use `getPlayerPosition()` not `getCurrentPosition()`
+   - When asked "come here" / "follow me", use `followPlayer()` with the name from context
+
+**Files changed:**
+- `core/src/main/java/com/mcagent/core/service/LangChain4jService.java` — Added `injectPlayerContext()`, wired `BotOperations`.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Added `<pronoun_resolution>` section to system prompt.
+- `core/src/main/java/com/mcagent/core/service/BotOperations.java` — Added `getPlayerPosition(String)`.
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — Added `@Tool getPlayerPosition`.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricBaritoneBridge.java` — Implemented `getPlayerPosition` via `Minecraft.getInstance().level.entitiesForRendering()` scan.
+- `core/src/test/java/com/mcagent/core/TestRunner.java` — Added mock `getPlayerPosition`.
+- `core/src/test/java/com/mcagent/core/service/LangChain4jServiceTest.java` — Added `ChatMemory` and `BotOperations` mocks.
+
+**Build & deploy:**
+- `:core:test` — 20 tests PASSED
+- `:fabric-mod:shadowJar` — SUCCESS
+- JAR deployed to `~/Library/Application Support/minecraft/mods/`
+
+---
+
+---
+
+## 2026-05-25 — Session: Fix Timing — Late LLM "Starting" Messages
+
+**Branch:** `issue/3-message-queuing`
+**Issue:** [#3](https://github.com/johnsosoka/McAgent/issues/3) (continued)
+
+### What we did
+
+**Problem identified from user testing:**
+After saying `agent come here`, the bot physically arrived at the player's location quickly, but ~20 seconds later the LLM sent a chat message saying "I've started navigating to your coordinates..." — which was confusing because the bot was already there.
+
+**Root cause:** LLM API round-trip (~20-30s) is slower than short-distance pathing. The `navigateTo()` tool executes immediately during the `chat()` call, but the LLM's conversational response isn't returned until the API completes. By then, the bot has already arrived.
+
+**Two-part fix:**
+
+1. **Immediate chat feedback from tools** — `navigateTo()` and `followPlayer()` in `MinecraftTools` now call `chatService.send()` immediately upon success. The player sees "Navigating to (X, Y, Z)" or "Following player X" in real-time, independent of LLM latency.
+
+2. **System prompt timing guidance** — Added `<timing_guidance>` to `Assistant` system prompt: navigation and follow tools send their own immediate confirmation. The LLM should NOT send a separate "I'm starting to..." message because it may arrive after the bot has already arrived.
+
+**Files changed:**
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — `navigateTo()` and `followPlayer()` now send immediate chat.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Added `<timing_guidance>` section.
+
+**Build & deploy:**
+- `:core:test` — 20 tests PASSED
+- `:fabric-mod:shadowJar` — SUCCESS
+- JAR deployed to `~/Library/Application Support/minecraft/mods/`
+
+---
+
+---
+
+## 2026-05-25 — Session: Final Validation & Acceptance
+
+**Branch:** `issue/3-message-queuing`
+**Issue:** [#3](https://github.com/johnsosoka/McAgent/issues/3) (concluded)
+
+### What we did
+
+**Test session results — all green:**
+- `agent come here` → immediate "Following player lexicon_social" in chat, bot followed correctly
+- `agent this is my house, can you save that?` → processed and saved location
+- `agent stop following me` → priority=CANCEL, stopped following, saved location
+- Clean disconnect when player left — no NPE, no crash
+- Clean shutdown at session end
+
+**Log analysis:**
+- No errors, exceptions, NPEs, or `ConcurrentModificationException`
+- Spring context: Beans: 45, all initialized successfully
+- Queue: `BotEventQueue started. Inbound capacity=8, outbound capacity=4`
+- Commands processed with correct priorities (NORMAL for chat, CANCEL for stop)
+- Framework messages: throttled and deduplicated as designed
+
+**Remaining observation (non-blocking):**
+- Baritone emits `Pathing was cancelled` in idle state before pathing begins. This is normal Baritone behavior, not a bug. The framework buffer handles it gracefully.
+
+### Status
+
+- [x] Message queuing infrastructure
+- [x] Framework throttling & deduplication
+- [x] Thread safety via `ClientThreadExecutor`
+- [x] `.env` loading from Minecraft config directory
+- [x] Player context injection with pronoun resolution
+- [x] Immediate tool chat feedback (no LLM latency)
+- [x] Disconnect debounce (3s)
+- [x] NPE hardening after shutdown
+- [x] All 20 core tests passing
+- [x] Shadow JAR builds successfully
+- [x] In-game validation passed
+
+**Ready for merge.**
+
+---
+
+*Next: Issue #4 — Player / Entity Scanning (`locatePlayer`, `scanForPlayers`, `scanForMobs`).*

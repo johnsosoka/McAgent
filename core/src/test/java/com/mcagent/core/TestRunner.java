@@ -201,6 +201,12 @@ public class TestRunner {
         }
 
         @Override
+        public java.util.Optional<Location> getPlayerPosition(String playerName) {
+            log.info("[MOCK] getPlayerPosition({})", playerName);
+            return java.util.Optional.of(new Location(50, 64, 50));
+        }
+
+        @Override
         public void setProgressCallback(java.util.function.Consumer<String> callback) {
             // no-op in test mock
         }

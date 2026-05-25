@@ -37,9 +37,11 @@ public class MinecraftTools {
             @P("The player's name to follow") String playerName) {
         log.info("Tool: followPlayer({})", playerName);
         var result = bot.followPlayer(playerName);
-        return result.isSuccess()
-                ? "Following player " + playerName
-                : "Cannot follow: " + result.getMessage();
+        if (result.isSuccess()) {
+            chatService.send("Following player " + playerName);
+            return "Following player " + playerName;
+        }
+        return "Cannot follow: " + result.getMessage();
     }
 
     @Tool("Navigate to specific X Y Z coordinates")
@@ -49,9 +51,11 @@ public class MinecraftTools {
             @P("Z coordinate") int z) {
         log.info("Tool: navigateTo({}, {}, {})", x, y, z);
         var result = bot.navigateTo(x, y, z);
-        return result.isSuccess()
-                ? "Navigating to (" + x + ", " + y + ", " + z + ")"
-                : "Cannot navigate: " + result.getMessage();
+        if (result.isSuccess()) {
+            chatService.send("Navigating to (" + x + ", " + y + ", " + z + ")");
+            return "Navigating to (" + x + ", " + y + ", " + z + ")";
+        }
+        return "Cannot navigate: " + result.getMessage();
     }
 
     @Tool("Navigate to a previously remembered location by name")
@@ -190,6 +194,15 @@ public class MinecraftTools {
     public String getCurrentPosition() {
         Location pos = bot.getCurrentPosition();
         return "Current position: " + pos;
+    }
+
+    @Tool("Get another player's current coordinates by name. Only works if the player is loaded in the world (within render distance).")
+    public String getPlayerPosition(
+            @P("The player's name to look up") String playerName) {
+        log.info("Tool: getPlayerPosition({})", playerName);
+        var pos = bot.getPlayerPosition(playerName);
+        return pos.map(loc -> playerName + " is at " + loc)
+                .orElse("I can't see " + playerName + " right now. They may be out of range or offline.");
     }
 
     @Tool("Send a message to the player chat. Use this to report progress, ask questions, or confirm actions during multi-step tasks.")

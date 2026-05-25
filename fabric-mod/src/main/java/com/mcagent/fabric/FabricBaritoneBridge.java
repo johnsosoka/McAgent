@@ -16,14 +16,17 @@ import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.fabric.queue.ClientThreadExecutor;
 import lombok.extern.slf4j.Slf4j;
+import net.minecraft.client.Minecraft;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -174,6 +177,23 @@ public class FabricBaritoneBridge implements BotOperations {
         return ClientThreadExecutor.execute(() -> {
             var pos = baritone.getPlayerContext().playerFeet();
             return new Location(pos.x, pos.y, pos.z);
+        });
+    }
+
+    @Override
+    public Optional<Location> getPlayerPosition(String playerName) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null) {
+                return Optional.<Location>empty();
+            }
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                if (entity instanceof Player p && p.getName().getString().equalsIgnoreCase(playerName)) {
+                    BlockPos pos = p.blockPosition();
+                    return Optional.of(new Location(pos.getX(), pos.getY(), pos.getZ()));
+                }
+            }
+            return Optional.<Location>empty();
         });
     }
 

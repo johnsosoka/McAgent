@@ -2,6 +2,7 @@ package com.mcagent.core.service;
 
 import com.mcagent.core.model.PathResult;
 
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
@@ -25,6 +26,12 @@ public interface BotOperations {
     void resume();
 
     Location getCurrentPosition();
+
+    /**
+     * Look up a player's current coordinates by name in the loaded world.
+     * Returns empty if the player is not visible (out of render distance or offline).
+     */
+    Optional<Location> getPlayerPosition(String playerName);
 
     /**
      * Register a callback that receives human-readable progress/status messages
