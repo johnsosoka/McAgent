@@ -55,10 +55,100 @@ public interface BotOperations {
     List<EntityInfo> getNearbyEntities(String entityType, int radius);
 
     /**
+     * Navigate to surface X,Z coordinates (any Y level).
+     * Uses Baritone's GoalXZ.
+     */
+    PathResult navigateToXZ(int x, int z);
+
+    /**
+     * Navigate to a specific Y level (any X,Z).
+     * Useful for strip mining. Uses Baritone's GoalYLevel.
+     */
+    PathResult navigateToYLevel(int y);
+
+    /**
+     * Explore within a given radius of a center point.
+     * Uses Baritone's GoalNear or GoalXZ with random offset.
+     */
+    PathResult exploreNear(Location center, int radius);
+
+    /**
+     * Retreat from a specific coordinate to maintain a safe distance.
+     */
+    PathResult fleeFrom(Location threat, int safeDistance);
+
+    /**
+     * Navigate to the nearest of multiple candidate locations.
+     * Uses Baritone's GoalComposite.
+     */
+    PathResult navigateToNearest(List<Location> candidates);
+
+    /**
+     * Enable or disable safety mode. When enabled, the bot avoids mobs,
+     * disables parkour/sprint, avoids breaking blocks.
+     */
+    void setSafetyMode(boolean enabled);
+
+    /**
+     * Get the bot's current health and hunger status.
+     */
+    HealthStatus getHealthStatus();
+
+    /**
+     * Scan for hostile mobs within a radius and report them as threats
+     * with distance and direction.
+     */
+    List<ThreatInfo> getNearbyThreats(int radius);
+
+    /**
+     * Set pathing behavior mode: "careful", "aggressive", or "default".
+     * careful: no breaking, no parkour/sprint
+     * aggressive: allows breaking, parkour, sprint
+     * default: restores Baritone defaults
+     */
+    void setPathingBehavior(String mode);
+
+    /**
+     * Add a block type to the avoid-breaking list.
+     * blockType should be a Minecraft block ID, e.g. "minecraft:glass".
+     */
+    void addBlockToAvoid(String blockType);
+
+    /**
+     * Clear all custom block avoidance rules and restore defaults.
+     */
+    void clearAvoidedBlocks();
+
+    /**
      * Register a callback that receives human-readable progress/status messages
      * from the bot (e.g. "Arrived at destination", "Mining complete").
      */
     void setProgressCallback(Consumer<String> callback);
+
+    /**
+     * Health and hunger status record.
+     */
+    record HealthStatus(float health, float maxHealth, int foodLevel, int armorLevel) {
+        public boolean isHealthy() {
+            return health > maxHealth * 0.5f && foodLevel > 10;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("Health: %.0f/%.0f, Food: %d/20, Armor: %d",
+                    health, maxHealth, foodLevel, armorLevel);
+        }
+    }
+
+    /**
+     * Information about a nearby threat (hostile mob).
+     */
+    record ThreatInfo(String type, Location location, double distance, String direction) {
+        @Override
+        public String toString() {
+            return String.format("%s at %s, %.0f blocks %s", type, location, distance, direction);
+        }
+    }
 
     record Location(int x, int y, int z) {
         public double distanceTo(Location other) {

@@ -32,6 +32,11 @@ public interface Assistant {
             <available_tools>
             - navigateTo(x, y, z) — walk to coordinates
             - navigateToLocation(name) — walk to a remembered location
+            - navigateToSurface(x, z) — walk to surface X,Z coordinates (any Y level)
+            - goToDepth(y) — go to a specific Y level (strip mining)
+            - exploreArea(x, y, z, radius) — explore within a radius of a center point
+            - fleeFrom(x, y, z, distance) — retreat from coordinates to maintain safe distance
+            - navigateToNearestLocation(locationNames) — walk to the nearest of multiple remembered locations (comma-separated names)
             - followPlayer(playerName) — follow a player continuously
             - mineResource(blockType, qty, radius) — mine blocks
             - rememberLocation(name, description) — save current position
@@ -45,7 +50,20 @@ public interface Assistant {
             - scanForPlayers(radius) — list all nearby players within radius
             - scanForEntities(entityType, radius) — scan for mobs or animals of a specific type
             - sendMessage(text) — send a chat message to the player (use for progress updates, confirmations, questions)
+            - setSafetyMode(enabled) — enable/disable safe mode (no breaking, no parkour/sprint, mob avoidance)
+            - getStatusReport() — report bot health, hunger, armor, and nearby threats
+            - setPathingBehavior(mode) — set careful, aggressive, or default pathing behavior
+            - avoidBreakingBlock(blockType) — add a block to the avoid-breaking list
+            - clearBlockAvoidance() — clear all block avoidance rules
             </available_tools>
+
+            <advanced_pathing_guidance>
+            - navigateToSurface is for X,Z surface travel where any Y level is acceptable.
+            - goToDepth is for vertical navigation, e.g. strip mining at a particular depth.
+            - exploreArea is for exploration within a radius; the bot paths to a random point inside the area.
+            - fleeFrom is for emergency retreat from threats; provide threat coordinates and desired safe distance.
+            - navigateToNearestLocation picks the closest of multiple waypoints by name; provide a comma-separated list.
+            </advanced_pathing_guidance>
 
             <entity_scanning_guidance>
             - locatePlayer is for finding a specific player by name.
@@ -67,6 +85,15 @@ public interface Assistant {
             Do NOT send a separate "I'm starting to..." message — it may arrive after the bot has already arrived.
             Only send a message via sendMessage if you need to ask a question, report a problem, or confirm a completed multi-step task.
             </timing_guidance>
+
+            <safety_guidance>
+            - setSafetyMode(true) enables overall cautious behavior: no block breaking, no parkour/sprint, mob avoidance, and door usage.
+            - setPathingBehavior("careful") is for fine-tuned pathing control without breaking blocks or sprinting, while still using doors.
+            - avoidBreakingBlock and clearBlockAvoidance protect specific block types from being broken.
+            - getStatusReport checks the bot's health and scans for nearby hostile mobs.
+            - When the player says "be careful" or "don't break anything", use setSafetyMode(true) or setPathingBehavior("careful").
+            - When the player says "go inside" and a house is nearby, use setPathingBehavior("careful") first to avoid breaking windows.
+            </safety_guidance>
 
             <output_format>
             You can call one or more tools in a single turn. After tools execute, provide a concise conversational response.

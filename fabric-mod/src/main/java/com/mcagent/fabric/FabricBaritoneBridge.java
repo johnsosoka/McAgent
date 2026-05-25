@@ -7,7 +7,13 @@ import baritone.api.event.events.PathEvent;
 import baritone.api.event.events.TickEvent;
 import baritone.api.event.events.type.EventState;
 import baritone.api.event.listener.AbstractGameEventListener;
+import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
+import baritone.api.pathing.goals.GoalComposite;
+import baritone.api.pathing.goals.GoalInverted;
+import baritone.api.pathing.goals.GoalNear;
+import baritone.api.pathing.goals.GoalXZ;
+import baritone.api.pathing.goals.GoalYLevel;
 import baritone.api.process.ICustomGoalProcess;
 import baritone.api.process.IFollowProcess;
 import baritone.api.process.IMineProcess;
@@ -32,6 +38,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -56,6 +63,12 @@ public class FabricBaritoneBridge implements BotOperations {
             Map.entry("OAK_LOG", Blocks.OAK_LOG),
             Map.entry("BIRCH_LOG", Blocks.BIRCH_LOG),
             Map.entry("SPRUCE_LOG", Blocks.SPRUCE_LOG)
+    );
+
+    private static final Set<String> HOSTILE_MOBS = Set.of(
+            "Creeper", "Zombie", "Skeleton", "Spider", "Enderman", "Witch",
+            "Drowned", "Husk", "Stray", "WitherSkeleton", "Blaze", "Ghast",
+            "PiglinBrute", "Vindicator", "Evoker", "Ravager"
     );
 
     private final IBaritone baritone;
@@ -112,6 +125,88 @@ public class FabricBaritoneBridge implements BotOperations {
                 .message("Use navigateTo(int, int, int) with resolved coordinates.")
                 .type(PathResult.PathResultType.ERROR)
                 .build();
+    }
+
+    @Override
+    public PathResult navigateToXZ(int x, int z) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: navigateToXZ({}, {})", x, z);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalXZ(x, z));
+            notify("Navigating to surface coordinates (" + x + ", " + z + ")");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Pathing to surface (" + x + ", " + z + ")")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult navigateToYLevel(int y) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: navigateToYLevel({})", y);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalYLevel(y));
+            notify("Going to Y=" + y);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Going to Y=" + y)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult exploreNear(Location center, int radius) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: exploreNear({}, {})", center, radius);
+            BlockPos pos = new BlockPos(center.x(), center.y(), center.z());
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalNear(pos, radius));
+            notify("Exploring within " + radius + " blocks of " + center);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Exploring within " + radius + " blocks of " + center)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult fleeFrom(Location threat, int safeDistance) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: fleeFrom({}, {})", threat, safeDistance);
+            Location bot = getCurrentPosition();
+            double dx = bot.x() - threat.x();
+            double dz = bot.z() - threat.z();
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            double scale = safeDistance / Math.max(dist, 1.0);
+            int retreatX = (int) (bot.x() + dx * scale);
+            int retreatZ = (int) (bot.z() + dz * scale);
+            BlockPos retreatPos = new BlockPos(retreatX, bot.y(), retreatZ);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalBlock(retreatPos));
+            notify("Fleeing to maintain " + safeDistance + " blocks from threat");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Fleeing from " + threat + ", maintaining " + safeDistance + " blocks")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult navigateToNearest(List<Location> candidates) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: navigateToNearest({} candidates)", candidates.size());
+            Goal[] goals = candidates.stream()
+                    .map(loc -> new GoalBlock(new BlockPos(loc.x(), loc.y(), loc.z())))
+                    .toArray(Goal[]::new);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalComposite(goals));
+            notify("Navigating to nearest of " + candidates.size() + " locations");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Navigating to nearest of " + candidates.size() + " locations")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
     }
 
     @Override
@@ -284,6 +379,150 @@ public class FabricBaritoneBridge implements BotOperations {
             entities.sort((a, b) -> Double.compare(a.getDistance(), b.getDistance()));
             return entities;
         });
+    }
+
+    @Override
+    public void setSafetyMode(boolean enabled) {
+        ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: setSafetyMode({})", enabled);
+            var settings = BaritoneAPI.getSettings();
+            if (enabled) {
+                settings.allowBreak.value = false;
+                settings.allowParkour.value = false;
+                settings.allowSprint.value = false;
+                settings.avoidance.value = true;
+                settings.mobAvoidanceRadius.value = 16;
+                populateCommonAvoidBlocks();
+                notify("Safe mode enabled. I'll be careful.");
+            } else {
+                settings.allowBreak.value = true;
+                settings.allowParkour.value = true;
+                settings.allowSprint.value = true;
+                settings.avoidance.value = false;
+                settings.mobAvoidanceRadius.value = 8;
+                settings.blocksToAvoidBreaking.value.clear();
+                notify("Safe mode disabled. Normal behavior restored.");
+            }
+        });
+    }
+
+    @Override
+    public HealthStatus getHealthStatus() {
+        return ClientThreadExecutor.execute(() -> {
+            var player = Minecraft.getInstance().player;
+            if (player == null) {
+                log.warn("Cannot get health status: player is null");
+                return new HealthStatus(0, 0, 0, 0);
+            }
+            float health = player.getHealth();
+            float maxHealth = player.getMaxHealth();
+            int foodLevel = player.getFoodData().getFoodLevel();
+            int armorValue = player.getArmorValue();
+            return new HealthStatus(health, maxHealth, foodLevel, armorValue);
+        });
+    }
+
+    @Override
+    public List<ThreatInfo> getNearbyThreats(int radius) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null || mc.player == null) {
+                return new ArrayList<ThreatInfo>();
+            }
+            Location botPos = new Location(mc.player.blockPosition().getX(), mc.player.blockPosition().getY(), mc.player.blockPosition().getZ());
+            List<ThreatInfo> threats = new ArrayList<>();
+            for (Entity entity : mc.level.entitiesForRendering()) {
+                String type = entity.getClass().getSimpleName();
+                if (isHostileMob(type)) {
+                    BlockPos pos = entity.blockPosition();
+                    Location loc = new Location(pos.getX(), pos.getY(), pos.getZ());
+                    double dist = botPos.distanceTo(loc);
+                    if (dist <= radius) {
+                        threats.add(new ThreatInfo(type, loc, dist, calculateDirection(botPos, loc)));
+                    }
+                }
+            }
+            threats.sort((a, b) -> Double.compare(a.distance(), b.distance()));
+            return threats;
+        });
+    }
+
+    @Override
+    public void setPathingBehavior(String mode) {
+        ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: setPathingBehavior({})", mode);
+            var settings = BaritoneAPI.getSettings();
+            switch (mode.toLowerCase()) {
+                case "careful" -> {
+                    settings.allowBreak.value = false;
+                    settings.allowParkour.value = false;
+                    settings.allowSprint.value = false;
+                    populateCommonAvoidBlocks();
+                    notify("Pathing behavior set to careful.");
+                }
+                case "aggressive" -> {
+                    settings.allowBreak.value = true;
+                    settings.allowParkour.value = true;
+                    settings.allowSprint.value = true;
+                    settings.blocksToAvoidBreaking.value.clear();
+                    notify("Pathing behavior set to aggressive.");
+                }
+                case "default" -> {
+                    settings.allowBreak.value = true;
+                    settings.allowParkour.value = true;
+                    settings.allowSprint.value = true;
+                    settings.blocksToAvoidBreaking.value.clear();
+                    notify("Pathing behavior set to default.");
+                }
+                default -> log.warn("Unknown pathing behavior mode: {}", mode);
+            }
+        });
+    }
+
+    @Override
+    public void addBlockToAvoid(String blockType) {
+        ClientThreadExecutor.execute(() -> {
+            Block block = resolveBlock(blockType);
+            if (block != null) {
+                BaritoneAPI.getSettings().blocksToAvoidBreaking.value.add(block);
+                log.info("Added block to avoid-breaking list: {}", blockType);
+            } else {
+                log.warn("Could not find block: {}", blockType);
+            }
+        });
+    }
+
+    @Override
+    public void clearAvoidedBlocks() {
+        ClientThreadExecutor.execute(() -> {
+            BaritoneAPI.getSettings().blocksToAvoidBreaking.value.clear();
+            log.info("Cleared all block avoidance rules.");
+        });
+    }
+
+    private boolean isHostileMob(String type) {
+        return HOSTILE_MOBS.contains(type);
+    }
+
+    private void populateCommonAvoidBlocks() {
+        var avoidList = BaritoneAPI.getSettings().blocksToAvoidBreaking.value;
+        avoidList.add(Blocks.GLASS);
+        avoidList.add(Blocks.GLASS_PANE);
+        avoidList.add(Blocks.OAK_PLANKS);
+        avoidList.add(Blocks.BIRCH_PLANKS);
+        avoidList.add(Blocks.SPRUCE_PLANKS);
+        avoidList.add(Blocks.JUNGLE_PLANKS);
+        avoidList.add(Blocks.ACACIA_PLANKS);
+        avoidList.add(Blocks.DARK_OAK_PLANKS);
+        avoidList.add(Blocks.OAK_LOG);
+        avoidList.add(Blocks.BIRCH_LOG);
+        avoidList.add(Blocks.SPRUCE_LOG);
+        avoidList.add(Blocks.JUNGLE_LOG);
+        avoidList.add(Blocks.ACACIA_LOG);
+        avoidList.add(Blocks.DARK_OAK_LOG);
+        avoidList.add(Blocks.STONE_BRICKS);
+        avoidList.add(Blocks.BRICKS);
+        avoidList.add(Blocks.WHITE_WOOL);
     }
 
     private String calculateDirection(Location from, Location to) {

@@ -245,11 +245,146 @@ public class MinecraftTools {
                 .collect(Collectors.joining("\n"));
     }
 
+    @Tool("Navigate to surface X,Z coordinates. The bot will find any Y level to reach the target.")
+    public String navigateToSurface(
+            @P("X coordinate") int x,
+            @P("Z coordinate") int z) {
+        log.info("Tool: navigateToSurface({}, {})", x, z);
+        var result = bot.navigateToXZ(x, z);
+        if (result.isSuccess()) {
+            chatService.send("Navigating to surface coordinates (" + x + ", " + z + ")");
+            return "Navigating to surface (" + x + ", " + z + ")";
+        }
+        return "Cannot navigate: " + result.getMessage();
+    }
+
+    @Tool("Go to a specific Y level. Useful for strip mining at a particular depth.")
+    public String goToDepth(
+            @P("Target Y level") int y) {
+        log.info("Tool: goToDepth({})", y);
+        var result = bot.navigateToYLevel(y);
+        if (result.isSuccess()) {
+            chatService.send("Going to Y=" + y);
+            return "Going to Y=" + y;
+        }
+        return "Cannot navigate: " + result.getMessage();
+    }
+
+    @Tool("Explore within a radius of a center point. The bot will path to a random point inside the area.")
+    public String exploreArea(
+            @P("Center X") int x,
+            @P("Center Y") int y,
+            @P("Center Z") int z,
+            @P("Radius in blocks") int radius) {
+        log.info("Tool: exploreArea({}, {}, {}, {})", x, y, z, radius);
+        var center = new BotOperations.Location(x, y, z);
+        var result = bot.exploreNear(center, radius);
+        if (result.isSuccess()) {
+            chatService.send("Exploring within " + radius + " blocks of (" + x + ", " + y + ", " + z + ")");
+            return "Exploring within " + radius + " blocks of (" + x + ", " + y + ", " + z + ")";
+        }
+        return "Cannot explore: " + result.getMessage();
+    }
+
+    @Tool("Flee from specific coordinates to maintain a safe distance. Use when threats are nearby.")
+    public String fleeFrom(
+            @P("Threat X") int x,
+            @P("Threat Y") int y,
+            @P("Threat Z") int z,
+            @P("Safe distance in blocks") int distance) {
+        log.info("Tool: fleeFrom({}, {}, {}, {})", x, y, z, distance);
+        var threat = new BotOperations.Location(x, y, z);
+        var result = bot.fleeFrom(threat, distance);
+        if (result.isSuccess()) {
+            chatService.send("Fleeing to maintain " + distance + " blocks from threat");
+            return "Fleeing from (" + x + ", " + y + ", " + z + "), maintaining " + distance + " blocks";
+        }
+        return "Cannot flee: " + result.getMessage();
+    }
+
+    @Tool("Navigate to the nearest of multiple remembered locations by name. Provide a comma-separated list of location names.")
+    public String navigateToNearestLocation(
+            @P("Comma-separated location names") String locationNames) {
+        log.info("Tool: navigateToNearestLocation({})", locationNames);
+        String[] names = locationNames.split(",");
+        List<BotOperations.Location> candidates = new ArrayList<>();
+        for (String name : names) {
+            String trimmed = name.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            var found = locationMemory.findByName(trimmed);
+            if (found.isPresent()) {
+                var loc = found.get();
+                candidates.add(new BotOperations.Location(loc.getX(), loc.getY(), loc.getZ()));
+            }
+        }
+        if (candidates.isEmpty()) {
+            return "None of the specified locations were found: " + locationNames;
+        }
+        var result = bot.navigateToNearest(candidates);
+        if (result.isSuccess()) {
+            chatService.send("Navigating to nearest of " + locationNames);
+            return "Navigating to nearest of " + locationNames;
+        }
+        return "Cannot navigate: " + result.getMessage();
+    }
+
     @Tool("Send a message to the player chat. Use this to report progress, ask questions, or confirm actions during multi-step tasks.")
     public String sendMessage(
             @P("Message text to send to the player") String message) {
         log.info("Tool: sendMessage({})", message);
         chatService.send(message);
         return "Sent: " + message;
+    }
+
+    @Tool("Enable or disable safe mode. Safe mode prevents block breaking, disables parkour/sprint, enables mob avoidance, and allows door usage.")
+    public String setSafetyMode(@P("true to enable safe mode, false for normal") boolean enabled) {
+        log.info("Tool: setSafetyMode({})", enabled);
+        bot.setSafetyMode(enabled);
+        if (enabled) {
+            chatService.send("Safe mode enabled. I'll be careful.");
+            return "Safe mode enabled";
+        } else {
+            chatService.send("Safe mode disabled. Normal behavior restored.");
+            return "Safe mode disabled";
+        }
+    }
+
+    @Tool("Report the bot's current health, hunger, armor, and any nearby threats.")
+    public String getStatusReport() {
+        log.info("Tool: getStatusReport");
+        var health = bot.getHealthStatus();
+        var threats = bot.getNearbyThreats(32);
+        String threatStr = threats.isEmpty()
+                ? "none"
+                : threats.stream().map(Object::toString).collect(Collectors.joining(", "));
+        return "Status: " + health + ". Nearby threats: " + threatStr;
+    }
+
+    @Tool("Set pathing behavior mode. 'careful' avoids breaking blocks and uses doors. 'aggressive' allows breaking for speed. 'default' restores normal settings.")
+    public String setPathingBehavior(@P("Behavior mode: careful, aggressive, or default") String mode) {
+        log.info("Tool: setPathingBehavior({})", mode);
+        String normalized = mode.toLowerCase();
+        if (!normalized.equals("careful") && !normalized.equals("aggressive") && !normalized.equals("default")) {
+            return "Invalid mode: " + mode + ". Use careful, aggressive, or default.";
+        }
+        bot.setPathingBehavior(normalized);
+        chatService.send("Pathing behavior set to " + normalized);
+        return "Pathing behavior set to " + normalized;
+    }
+
+    @Tool("Add a block type to the avoid-breaking list. The bot will path around these blocks instead of breaking them. Examples: minecraft:glass, minecraft:oak_planks")
+    public String avoidBreakingBlock(@P("Block ID to avoid breaking, e.g. minecraft:glass") String blockType) {
+        log.info("Tool: avoidBreakingBlock({})", blockType);
+        bot.addBlockToAvoid(blockType);
+        return "Added " + blockType + " to avoid-breaking list";
+    }
+
+    @Tool("Clear all custom block avoidance rules and restore defaults.")
+    public String clearBlockAvoidance() {
+        log.info("Tool: clearBlockAvoidance");
+        bot.clearAvoidedBlocks();
+        return "Cleared all block avoidance rules.";
     }
 }
