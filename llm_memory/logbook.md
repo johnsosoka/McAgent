@@ -303,4 +303,51 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 
 ---
 
-*Next: Issue #4 — Player / Entity Scanning (`locatePlayer`, `scanForPlayers`, `scanForMobs`).*
+## 2026-05-25 — Session: Sprint Planning — Issue #4 Player / Entity Scanning
+
+**Branch:** `issue/4-player-entity-scanning`
+**Issue:** [#4](https://github.com/johnsosoka/McAgent/issues/4)
+**Status:** Sprint started, branch cut from `origin/main`
+
+### What we did
+
+1. **Repo audit** — Verified `main` is clean and up-to-date with `origin/main`. PR #9 (Issue #3) fully merged.
+2. **Issue triage** — Reviewed all 5 open enhancement issues (#4–#8). Confirmed #4 as the logical next sprint based on:
+   - The planned roadmap (#3 → #4 → #5 → #7 → #6 → #8)
+   - Foundation dependency for #5 (fleeing needs threat location) and #6 (safety needs nearby mobs)
+   - Low risk (read-only, no movement or inventory changes)
+   - Partially previewed via `getPlayerPosition()` during #3
+3. **Branch created** — `issue/4-player-entity-scanning` cut from latest `main`.
+
+### Goals for this sprint
+
+- `locatePlayer(String playerName)` — coordinates, distance, direction for a specific player
+- `scanForPlayers(int radius)` — list all loaded players within radius
+- `scanForEntities(String entityType, int radius)` — filter by type (CREEPER, PIG, ZOMBIE, etc.)
+- Read-only world inspection — zero movement triggered by these tools
+- Integration tests in `core/` and `fabric-mod/`
+
+### Interface targets
+
+**BotOperations.java:**
+- `Location findPlayer(String playerName)`
+- `List<PlayerInfo> getNearbyPlayers(int radius)`
+- `List<EntityInfo> getNearbyEntities(String entityType, int radius)`
+
+**MinecraftTools.java:**
+- `@Tool locatePlayer`
+- `@Tool scanForPlayers`
+- `@Tool scanForEntities`
+
+### Remaining work
+
+- [ ] Implement entity scanning in `FabricBaritoneBridge`
+- [ ] Add `@Tool` methods to `MinecraftTools`
+- [ ] Add system prompt guidance for entity scanning tools
+- [ ] Core unit tests
+- [ ] Fabric integration validation
+- [ ] Merge to `main` (pending human approval)
+
+---
+
+*Next in queue after #4: Issue #5 — Advanced Pathing Goals (`GoalXZ`, `GoalYLevel`, `GoalNear`, `GoalInverted`).*
