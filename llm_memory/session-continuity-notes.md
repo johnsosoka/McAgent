@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-25
 **Branch:** `issue/4-player-entity-scanning`
-**Status:** POST-#3 MERGE — Sprint #4 started
+**Status:** Sprint #4 implementation complete — awaiting in-game validation
 
 ---
 
@@ -43,16 +43,27 @@ Issue #3 (Message Queuing & Event Harness) is **complete and merged to `main`** 
 ## Active Sprint: Issue #4 — Player / Entity Scanning
 
 **Branch:** `issue/4-player-entity-scanning`
+**Commit:** `c7e3923`
 
-### Goals
-- `locatePlayer(playerName)` — coordinates, distance, direction
-- `scanForPlayers(radius)` — all loaded players within radius
-- `scanForEntities(entityType, radius)` — filter by mob type (CREEPER, ZOMBIE, PIG, etc.)
+### Implementation Status
+- ✅ `BotOperations` interface — 3 new methods defined
+- ✅ `PlayerInfo` / `EntityInfo` DTOs — immutable Lombok builders
+- ✅ `FabricBaritoneBridge` — all methods wrapped in `ClientThreadExecutor.execute()`
+- ✅ `MinecraftTools` — 3 new `@Tool` methods with proper `@P` annotations
+- ✅ `Assistant` system prompt — updated with new tools + entity scanning guidance
+- ✅ `TestRunner` mock — implements new interface methods
+- ✅ `MinecraftToolsTest` — 6 unit tests (found / not-found for each tool)
+- ✅ Build & tests — 26 tests passing, core + fabric-mod compile green
+- ✅ Code review — passed (direction formula bug caught and fixed)
 
-### Interface Targets
+### Remaining before merge
+- [ ] In-game validation (deploy JAR, test `agent where is Steve?`, `agent scan for creepers`)
+- [ ] Human approval for merge to `main`
+
+### Interface Targets (all implemented)
 **BotOperations.java:**
 ```java
-Location findPlayer(String playerName);
+PlayerInfo findPlayer(String playerName);
 List<PlayerInfo> getNearbyPlayers(int radius);
 List<EntityInfo> getNearbyEntities(String entityType, int radius);
 ```
@@ -65,15 +76,15 @@ public String locatePlayer(@P("Player name") String playerName) { ... }
 @Tool("List nearby players within a radius")
 public String scanForPlayers(@P("Search radius in blocks") int radius) { ... }
 
-@Tool("List nearby mobs or animals of a given type")
-public String scanForEntities(@P("Entity type, e.g. CREEPER, PIG, COW, ZOMBIE") String entityType,
-                              @P("Search radius") int radius) { ... }
+@Tool("Scan for nearby mobs or animals of a specific type")
+public String scanForEntities(@P("Entity type, e.g. Creeper, Zombie, Pig, Cow") String entityType,
+                              @P("Search radius in blocks") int radius) { ... }
 ```
 
 ### Safety Notes
 - Read-only operations — no movement triggered
-- Use `Minecraft.getInstance().level.entitiesForRendering()` or `entities()` for scanning
-- `getPlayerPosition()` already exists as a reference implementation
+- Uses `Minecraft.getInstance().level.entitiesForRendering()` for scanning
+- Direction calculated with 8-sector compass (N, NE, E, SE, S, SW, W, NW)
 
 ---
 
