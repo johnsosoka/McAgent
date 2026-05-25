@@ -45,15 +45,23 @@ Issue #3 (Message Queuing) and #4 (Player/Entity Scanning) are **both complete a
 ## Active Sprint: Issue #5 — Advanced Pathing Goals
 
 **Branch:** `issue/5-advanced-pathing-goals`
+**Commit:** `fc5a0bb`
 
-### Goals
-- `navigateToXZ(x, z)` — path to surface coordinates (any Y)
-- `navigateToYLevel(y)` — path to specific depth (strip mining)
-- `exploreNear(center, radius)` — explore within radius
-- `fleeFrom(threat, safeDistance)` — retreat using `GoalInverted`
-- `navigateToNearest(candidates)` — nearest of multiple waypoints (stretch)
+### Implementation Status
+- ✅ `BotOperations` interface — 5 new methods defined
+- ✅ `FabricBaritoneBridge` — all methods wrapped in `ClientThreadExecutor.execute()`
+- ✅ `MinecraftTools` — 5 new `@Tool` methods with proper `@P` annotations
+- ✅ `Assistant` system prompt — updated with new tools + advanced pathing guidance
+- ✅ `TestRunner` mock — implements new interface methods
+- ✅ `MinecraftToolsTest` — 13 unit tests (success + failure for each tool)
+- ✅ Build & tests — 33 tests passing, core + fabric-mod compile green
+- ✅ Code review — passed (fleeFrom GoalInverted bug caught and fixed)
 
-### Interface Targets
+### Remaining before merge
+- [ ] In-game validation (deploy JAR, test `agent go to surface 100 200`, `agent go to Y=11`, `agent explore near here`, `agent run away`)
+- [ ] Human approval for merge to `main`
+
+### Interface Targets (all implemented)
 **BotOperations.java:**
 ```java
 PathResult navigateToXZ(int x, int z);
@@ -78,13 +86,17 @@ public String exploreArea(@P("Center X") int x, @P("Center Y") int y, @P("Center
 @Tool("Flee from specific coordinates to maintain a safe distance")
 public String fleeFrom(@P("Threat X") int x, @P("Threat Y") int y, @P("Threat Z") int z,
                        @P("Safe distance in blocks") int distance) { ... }
+
+@Tool("Navigate to the nearest of multiple remembered locations by name")
+public String navigateToNearestLocation(@P("Comma-separated location names") String locationNames) { ... }
 ```
 
 ### Technical Notes
-- Pure Baritone API — import goal classes (`GoalXZ`, `GoalYLevel`, `GoalNear`, `GoalInverted`, `GoalComposite`)
+- Pure Baritone API — `GoalXZ`, `GoalYLevel`, `GoalNear`, `GoalBlock`, `GoalComposite`
 - All implementations wrapped in `ClientThreadExecutor.execute()`
-- `fleeFrom` uses `GoalInverted(new GoalBlock(threatPos))` or safe-direction vector
-- `exploreNear` uses `GoalNear` or `GoalXZ` with random offset within radius
+- `fleeFrom` computes retreat vector away from threat, paths to retreat point with `GoalBlock`
+- `exploreNear` uses `GoalNear` for area exploration
+- `navigateToNearest` uses `GoalComposite` with `GoalBlock` instances for each candidate
 
 ---
 

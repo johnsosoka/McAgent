@@ -460,14 +460,79 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - `@Tool exploreArea(x, y, z, radius)` — "Explore within a radius of a center point"
 - `@Tool fleeFrom(x, y, z, distance)` — "Flee from specific coordinates to maintain safe distance"
 
+---
+
+## 2026-05-25 — Session: Implement Issue #5 — Advanced Pathing Goals
+
+**Branch:** `issue/5-advanced-pathing-goals`
+**Issue:** [#5](https://github.com/johnsosoka/McAgent/issues/5)
+**Status:** Implementation complete, code review passed, build green
+
+### What we did
+
+1. **Scaffolded `BotOperations` interface** — Added 5 new methods:
+   - `navigateToXZ(int x, int z)` — surface X,Z travel
+   - `navigateToYLevel(int y)` — vertical depth navigation
+   - `exploreNear(Location center, int radius)` — exploration within radius
+   - `fleeFrom(Location threat, int safeDistance)` — emergency retreat
+   - `navigateToNearest(List<Location> candidates)` — nearest waypoint selection
+
+2. **Delegated implementation to senior engineer agent** — Full brief at `llm_memory/issue-5-implementation-brief.md`.
+
+3. **Implemented in `FabricBaritoneBridge`:**
+   - All 5 methods wrapped in `ClientThreadExecutor.execute()` for thread safety
+   - `navigateToXZ` — `GoalXZ`
+   - `navigateToYLevel` — `GoalYLevel`
+   - `exploreNear` — `GoalNear`
+   - `fleeFrom` — computes retreat point away from threat, paths to it with `GoalBlock`
+   - `navigateToNearest` — `GoalComposite` built from `GoalBlock` instances
+
+4. **Added `@Tool` methods to `MinecraftTools`:**
+   - `navigateToSurface(x, z)` — surface travel
+   - `goToDepth(y)` — strip mining depth
+   - `exploreArea(x, y, z, radius)` — exploration
+   - `fleeFrom(x, y, z, distance)` — retreat
+   - `navigateToNearestLocation(locationNames)` — parses comma-separated names, looks up in `locationMemory`, picks nearest
+
+5. **Updated `Assistant.java` system prompt:**
+   - Added 5 new tools to `<available_tools>`
+   - Added `<advanced_pathing_guidance>` section
+
+6. **Updated test layer:**
+   - `TestRunner.MockBotOperations` — implements new methods with mock data
+   - `MinecraftToolsTest.java` — 13 unit tests (success + failure for each tool)
+
+7. **Code review findings & fixes:**
+   - **Critical:** Fixed `fleeFrom` — removed incorrect `GoalInverted` wrapper (would path toward threat instead of away); now paths directly to computed retreat point
+   - **Safety:** Fixed retreat Y coordinate to use bot's current Y instead of threat's Y
+   - **Tests:** Added failure-path tests for `goToDepth`, `exploreArea`, `fleeFrom`
+   - **Repo hygiene:** Updated `.gitignore` to exclude build artifacts, IDE files, OS files, runtime logs
+
+### Files changed / created
+
+- `core/src/main/java/com/mcagent/core/service/BotOperations.java` — Added 5 methods.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricBaritoneBridge.java` — Implemented 5 methods.
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — Added 5 `@Tool` methods.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Updated system prompt.
+- `core/src/test/java/com/mcagent/core/TestRunner.java` — Mock implementations.
+- `core/src/test/java/com/mcagent/core/tools/MinecraftToolsTest.java` — 13 tests (6 existing + 7 new).
+- `llm_memory/issue-5-implementation-brief.md` — New. Agent brief.
+- `.gitignore` — Updated with standard exclusions.
+
+### Build & test results
+
+- `:core:compileJava` — SUCCESS
+- `:core:test` — **33 tests PASSED** (20 existing + 13 new)
+- `:fabric-mod:compileJava` — SUCCESS
+
 ### Remaining work
 
-- [ ] Add methods to `BotOperations` interface
-- [ ] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
-- [ ] Add `@Tool` methods to `MinecraftTools`
-- [ ] Update `Assistant` system prompt
-- [ ] Update `TestRunner` mock
-- [ ] Unit tests
+- [x] Add methods to `BotOperations` interface
+- [x] Implement in `FabricBaritoneBridge` via `ClientThreadExecutor`
+- [x] Add `@Tool` methods to `MinecraftTools`
+- [x] Update `Assistant` system prompt
+- [x] Update `TestRunner` mock
+- [x] Unit tests
 - [ ] Fabric integration validation (in-game test)
 - [ ] Merge to `main` (pending human approval)
 
