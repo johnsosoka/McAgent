@@ -472,7 +472,6 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [ ] Merge to `main` (pending human approval)
 
 ---
-
 ---
 
 ## 2026-05-25 — Session: Implement Issue #5 — Advanced Pathing Goals

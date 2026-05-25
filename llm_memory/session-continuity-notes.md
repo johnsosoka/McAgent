@@ -2,13 +2,13 @@
 
 **Date:** 2026-05-25
 **Branch:** `issue/6-safety-mode-health-monitoring`
-**Status:** Sprint #6 started — Issue #6 scope expanded with respectful pathing
+**Status:** Sprint #6 started — Issues #5 and #6 combined for deployment
 
 ---
 
 ## Current State
 
-Issues #3 (Message Queuing), #4 (Player/Entity Scanning), and #5 (Advanced Pathing Goals) are **complete and merged or ready for merge**.
+Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing Goals), and #6 (Safety Mode & Health Monitoring) are all **implemented on this branch**.
 
 ### What Works (validated in-game)
 - ✅ Message queuing (`BotEventQueue`) with priority scheduling
@@ -22,7 +22,11 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), and #5 (Advanced Pathi
 - ✅ Player / entity scanning (`locatePlayer`, `scanForPlayers`, `scanForEntities`)
 - ✅ 8-sector compass direction calculation
 - ✅ Advanced pathing: surface X,Z, Y-level depth, exploration radius, fleeing, nearest waypoint
-- ✅ All 33 core tests passing
+- ✅ Safety mode: mob avoidance, no parkour/sprint, no block breaking
+- ✅ Health monitoring: health, hunger, armor, threat detection
+- ✅ Pathing behavior: careful / aggressive / default modes
+- ✅ Block avoidance: configurable avoid-breaking list
+- ✅ All tests passing
 - ✅ Shadow JAR builds successfully
 
 ### Open Issues (backlog)
@@ -30,7 +34,7 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), and #5 (Advanced Pathi
 |-------|-------|----------|----------|
 | #4 | Player / Entity Scanning | **Merged** | — |
 | #5 | Advanced Pathing Goals | **Complete on branch** | — |
-| **#6** | Safety Mode & Health Monitoring | **Current sprint** | None |
+| #6 | Safety Mode & Health Monitoring | **Current sprint** | None |
 | #7 | Inventory Queries | Can be parallel | None |
 | #8 | Building / Placement | Pending #6 | #6 (safety confirmation) |
 | #10 | Background Observation Loop | Future | Needs #5–#8 capabilities |
@@ -48,62 +52,53 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), and #5 (Advanced Pathi
 **Branch:** `issue/6-safety-mode-health-monitoring`
 
 ### Goals
-- `setSafetyMode(boolean)` — toggles mob avoidance, parkour, sprint, block breaking, door usage
-- `getHealthStatus()` — reports health, hunger, basic status
+- `setSafetyMode(boolean)` — toggles mob avoidance, parkour, sprint, block breaking
+- `getHealthStatus()` — reports health, hunger, armor
 - `getNearbyThreats(radius)` — lists hostile mobs with distance/direction
-- `setPathingBehavior(mode)` — "careful" (no breaking, uses doors), "aggressive", "default"
+- `setPathingBehavior(mode)` — "careful" (no breaking), "aggressive", "default"
 - `avoidBreakingBlock(blockType)` — add block to avoid-breaking list
 - `clearBlockAvoidance()` — reset avoidance rules
 
-### Why This Sprint
-- Both #6 blockers are resolved:
-  - #4 (entity scanning) → `getNearbyThreats()` can use `scanForEntities`
-  - #5 (pathing) → `fleeFrom()` is available for retreat
-- **Expanded scope:** Added "respectful pathing / house mode" — the bot can use doors and avoid breaking player-built blocks
-- Prevents property damage and makes the bot a better companion
+### Combined with Issue #5
+This branch now also includes all Issue #5 features:
+- `navigateToSurface(x, z)` — surface X,Z travel
+- `goToDepth(y)` — vertical depth navigation
+- `exploreArea(x, y, z, radius)` — exploration within radius
+- `fleeFrom(x, y, z, distance)` — emergency retreat
+- `navigateToNearestLocation(names)` — nearest waypoint selection
 
-### Interface Targets
+### Interface Targets (all implemented)
 **BotOperations.java:**
 ```java
+// Issue #5 — Advanced Pathing
+PathResult navigateToXZ(int x, int z);
+PathResult navigateToYLevel(int y);
+PathResult exploreNear(Location center, int radius);
+PathResult fleeFrom(Location threat, int safeDistance);
+PathResult navigateToNearest(List<Location> candidates);
+
+// Issue #6 — Safety & Health
 void setSafetyMode(boolean enabled);
 HealthStatus getHealthStatus();
 List<ThreatInfo> getNearbyThreats(int radius);
-void setPathingBehavior(String mode); // "careful", "aggressive", "default"
+void setPathingBehavior(String mode);
 void addBlockToAvoid(String blockType);
 void clearAvoidedBlocks();
 ```
 
-**MinecraftTools.java:**
-```java
-@Tool("Enable or disable safe mode (mob avoidance, no parkour, no sprint, no block breaking, uses doors)")
-public String setSafetyMode(@P("true to enable safe mode, false for normal") boolean enabled) { ... }
-
-@Tool("Report current health, hunger, and any nearby threats")
-public String getStatusReport() { ... }
-
-@Tool("Set pathing behavior mode. 'careful' avoids breaking blocks and uses doors. 'aggressive' allows breaking for speed. 'default' restores normal settings.")
-public String setPathingBehavior(@P("Behavior mode: careful, aggressive, or default") String mode) { ... }
-
-@Tool("Add a block type to the avoid-breaking list. Examples: minecraft:glass, minecraft:oak_planks")
-public String avoidBreakingBlock(@P("Block ID to avoid breaking") String blockType) { ... }
-
-@Tool("Clear all custom block avoidance rules and restore defaults")
-public String clearBlockAvoidance() { ... }
-```
-
 ### Behavior Modes
 
-| Mode | allowBreak | allowParkour | allowSprint | allowOpenDoors | blocksToAvoidBreaking |
-|------|-----------|-------------|-------------|---------------|----------------------|
-| **careful** | false | false | false | true | common building blocks |
-| **aggressive** | true | true | true | false | empty |
-| **default** | true | true | true | true | empty |
+| Mode | allowBreak | allowParkour | allowSprint | blocksToAvoidBreaking |
+|------|-----------|-------------|-------------|----------------------|
+| **careful** | false | false | false | common building blocks |
+| **aggressive** | true | true | true | empty |
+| **default** | true | true | true | empty |
 
 ### Technical Notes
-- Baritone settings accessed via `baritone.getSettings()`
+- Baritone settings accessed via `BaritoneAPI.getSettings()`
 - `blocksToAvoidBreaking` accepts a list of `Block` instances
 - Health via `Minecraft.getInstance().player.getHealth()` and `getFoodData().getFoodLevel()`
-- Threat detection reuses `scanForEntities` logic from Issue #4
+- Threat detection scans for 16 hostile mob types
 
 ---
 

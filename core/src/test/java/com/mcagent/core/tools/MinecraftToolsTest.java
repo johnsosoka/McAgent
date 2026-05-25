@@ -1,6 +1,7 @@
 package com.mcagent.core.tools;
 
 import com.mcagent.core.model.EntityInfo;
+import com.mcagent.core.model.PathResult;
 import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -21,14 +23,17 @@ class MinecraftToolsTest {
 
     private BotOperations bot;
     private ChatService chatService;
+    private LocationMemoryService locationMemory;
+    private VectorMemoryService vectorMemory;
+    private PlayerNoteService playerNoteService;
     private MinecraftTools tools;
 
     @BeforeEach
     void setUp() {
         bot = mock(BotOperations.class);
-        LocationMemoryService locationMemory = mock(LocationMemoryService.class);
-        VectorMemoryService vectorMemory = mock(VectorMemoryService.class);
-        PlayerNoteService playerNoteService = mock(PlayerNoteService.class);
+        locationMemory = mock(LocationMemoryService.class);
+        vectorMemory = mock(VectorMemoryService.class);
+        playerNoteService = mock(PlayerNoteService.class);
         chatService = mock(ChatService.class);
         tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService);
     }
@@ -109,6 +114,184 @@ class MinecraftToolsTest {
 
         assertThat(result).isEqualTo("No Zombie found within 50 blocks.");
         verify(bot).getNearbyEntities("Zombie", 50);
+    }
+
+    @Test
+    void navigateToSurface_shouldCallBotNavigateToXZ_andSendChat() {
+        when(bot.navigateToXZ(100, 200)).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Pathing to surface (100, 200)")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.navigateToSurface(100, 200);
+
+        assertThat(result).isEqualTo("Navigating to surface (100, 200)");
+        verify(bot).navigateToXZ(100, 200);
+        verify(chatService).send("Navigating to surface coordinates (100, 200)");
+    }
+
+    @Test
+    void navigateToSurface_shouldReturnErrorMessage_whenPathingFails() {
+        when(bot.navigateToXZ(100, 200)).thenReturn(
+                PathResult.builder()
+                        .success(false)
+                        .message("No path found")
+                        .type(PathResult.PathResultType.ERROR)
+                        .build()
+        );
+
+        String result = tools.navigateToSurface(100, 200);
+
+        assertThat(result).isEqualTo("Cannot navigate: No path found");
+        verify(bot).navigateToXZ(100, 200);
+    }
+
+    @Test
+    void goToDepth_shouldCallBotNavigateToYLevel_andSendChat() {
+        when(bot.navigateToYLevel(12)).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Going to Y=12")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.goToDepth(12);
+
+        assertThat(result).isEqualTo("Going to Y=12");
+        verify(bot).navigateToYLevel(12);
+        verify(chatService).send("Going to Y=12");
+    }
+
+    @Test
+    void exploreArea_shouldCallBotExploreNear_andSendChat() {
+        when(bot.exploreNear(new BotOperations.Location(10, 64, 20), 50)).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Exploring near (10, 64, 20)")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.exploreArea(10, 64, 20, 50);
+
+        assertThat(result).isEqualTo("Exploring within 50 blocks of (10, 64, 20)");
+        verify(bot).exploreNear(new BotOperations.Location(10, 64, 20), 50);
+        verify(chatService).send("Exploring within 50 blocks of (10, 64, 20)");
+    }
+
+    @Test
+    void fleeFrom_shouldCallBotFleeFrom_andSendChat() {
+        when(bot.fleeFrom(new BotOperations.Location(5, 64, 5), 20)).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Fleeing from (5, 64, 5)")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.fleeFrom(5, 64, 5, 20);
+
+        assertThat(result).isEqualTo("Fleeing from (5, 64, 5), maintaining 20 blocks");
+        verify(bot).fleeFrom(new BotOperations.Location(5, 64, 5), 20);
+        verify(chatService).send("Fleeing to maintain 20 blocks from threat");
+    }
+
+    @Test
+    void navigateToNearestLocation_shouldParseNames_andCallBotNavigateToNearest() {
+        com.mcagent.core.memory.LocationMemoryEntry home = new com.mcagent.core.memory.LocationMemoryEntry();
+        home.setName("home");
+        home.setX(100);
+        home.setY(64);
+        home.setZ(100);
+
+        com.mcagent.core.memory.LocationMemoryEntry base = new com.mcagent.core.memory.LocationMemoryEntry();
+        base.setName("base");
+        base.setX(200);
+        base.setY(70);
+        base.setZ(200);
+
+        when(locationMemory.findByName("home")).thenReturn(Optional.of(home));
+        when(locationMemory.findByName("base")).thenReturn(Optional.of(base));
+        when(bot.navigateToNearest(List.of(
+                new BotOperations.Location(100, 64, 100),
+                new BotOperations.Location(200, 70, 200)
+        ))).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Navigating to nearest of 2 locations")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.navigateToNearestLocation("home, base");
+
+        assertThat(result).isEqualTo("Navigating to nearest of home, base");
+        verify(bot).navigateToNearest(List.of(
+                new BotOperations.Location(100, 64, 100),
+                new BotOperations.Location(200, 70, 200)
+        ));
+        verify(chatService).send("Navigating to nearest of home, base");
+    }
+
+    @Test
+    void goToDepth_shouldReturnErrorMessage_whenPathingFails() {
+        when(bot.navigateToYLevel(12)).thenReturn(
+                PathResult.builder()
+                        .success(false)
+                        .message("Cannot reach Y=12")
+                        .type(PathResult.PathResultType.ERROR)
+                        .build()
+        );
+
+        String result = tools.goToDepth(12);
+
+        assertThat(result).isEqualTo("Cannot navigate: Cannot reach Y=12");
+        verify(bot).navigateToYLevel(12);
+    }
+
+    @Test
+    void exploreArea_shouldReturnErrorMessage_whenPathingFails() {
+        when(bot.exploreNear(new BotOperations.Location(10, 64, 20), 50)).thenReturn(
+                PathResult.builder()
+                        .success(false)
+                        .message("No path found")
+                        .type(PathResult.PathResultType.ERROR)
+                        .build()
+        );
+
+        String result = tools.exploreArea(10, 64, 20, 50);
+
+        assertThat(result).isEqualTo("Cannot explore: No path found");
+        verify(bot).exploreNear(new BotOperations.Location(10, 64, 20), 50);
+    }
+
+    @Test
+    void fleeFrom_shouldReturnErrorMessage_whenPathingFails() {
+        when(bot.fleeFrom(new BotOperations.Location(5, 64, 5), 20)).thenReturn(
+                PathResult.builder()
+                        .success(false)
+                        .message("No escape path")
+                        .type(PathResult.PathResultType.ERROR)
+                        .build()
+        );
+
+        String result = tools.fleeFrom(5, 64, 5, 20);
+
+        assertThat(result).isEqualTo("Cannot flee: No escape path");
+        verify(bot).fleeFrom(new BotOperations.Location(5, 64, 5), 20);
+    }
+
+    @Test
+    void navigateToNearestLocation_shouldReturnNotFound_whenNoLocationsMatch() {
+        when(locationMemory.findByName("missing")).thenReturn(Optional.empty());
+
+        String result = tools.navigateToNearestLocation("missing");
+
+        assertThat(result).isEqualTo("None of the specified locations were found: missing");
     }
 
     @Test

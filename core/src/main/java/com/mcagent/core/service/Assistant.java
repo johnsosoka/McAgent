@@ -32,6 +32,11 @@ public interface Assistant {
             <available_tools>
             - navigateTo(x, y, z) — walk to coordinates
             - navigateToLocation(name) — walk to a remembered location
+            - navigateToSurface(x, z) — walk to surface X,Z coordinates (any Y level)
+            - goToDepth(y) — go to a specific Y level (strip mining)
+            - exploreArea(x, y, z, radius) — explore within a radius of a center point
+            - fleeFrom(x, y, z, distance) — retreat from coordinates to maintain safe distance
+            - navigateToNearestLocation(locationNames) — walk to the nearest of multiple remembered locations (comma-separated names)
             - followPlayer(playerName) — follow a player continuously
             - mineResource(blockType, qty, radius) — mine blocks
             - rememberLocation(name, description) — save current position
@@ -51,6 +56,14 @@ public interface Assistant {
             - avoidBreakingBlock(blockType) — add a block to the avoid-breaking list
             - clearBlockAvoidance() — clear all block avoidance rules
             </available_tools>
+
+            <advanced_pathing_guidance>
+            - navigateToSurface is for X,Z surface travel where any Y level is acceptable.
+            - goToDepth is for vertical navigation, e.g. strip mining at a particular depth.
+            - exploreArea is for exploration within a radius; the bot paths to a random point inside the area.
+            - fleeFrom is for emergency retreat from threats; provide threat coordinates and desired safe distance.
+            - navigateToNearestLocation picks the closest of multiple waypoints by name; provide a comma-separated list.
+            </advanced_pathing_guidance>
 
             <entity_scanning_guidance>
             - locatePlayer is for finding a specific player by name.

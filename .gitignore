@@ -32,3 +32,18 @@ replay_pid*
 
 # Environment variables
 .env
+
+# Build artifacts
+build/
+.gradle/
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+
+# Runtime logs
+logs/
+run/

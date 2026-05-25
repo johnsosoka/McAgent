@@ -55,8 +55,37 @@ public interface BotOperations {
     List<EntityInfo> getNearbyEntities(String entityType, int radius);
 
     /**
+     * Navigate to surface X,Z coordinates (any Y level).
+     * Uses Baritone's GoalXZ.
+     */
+    PathResult navigateToXZ(int x, int z);
+
+    /**
+     * Navigate to a specific Y level (any X,Z).
+     * Useful for strip mining. Uses Baritone's GoalYLevel.
+     */
+    PathResult navigateToYLevel(int y);
+
+    /**
+     * Explore within a given radius of a center point.
+     * Uses Baritone's GoalNear or GoalXZ with random offset.
+     */
+    PathResult exploreNear(Location center, int radius);
+
+    /**
+     * Retreat from a specific coordinate to maintain a safe distance.
+     */
+    PathResult fleeFrom(Location threat, int safeDistance);
+
+    /**
+     * Navigate to the nearest of multiple candidate locations.
+     * Uses Baritone's GoalComposite.
+     */
+    PathResult navigateToNearest(List<Location> candidates);
+
+    /**
      * Enable or disable safety mode. When enabled, the bot avoids mobs,
-     * disables parkour/sprint, avoids breaking blocks, and uses doors.
+     * disables parkour/sprint, avoids breaking blocks.
      */
     void setSafetyMode(boolean enabled);
 
@@ -73,7 +102,7 @@ public interface BotOperations {
 
     /**
      * Set pathing behavior mode: "careful", "aggressive", or "default".
-     * careful: no breaking, no parkour/sprint, uses doors
+     * careful: no breaking, no parkour/sprint
      * aggressive: allows breaking, parkour, sprint
      * default: restores Baritone defaults
      */

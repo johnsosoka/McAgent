@@ -253,6 +253,56 @@ public class TestRunner {
         }
 
         @Override
+        public PathResult navigateToXZ(int x, int z) {
+            log.info("[MOCK] navigateToXZ({}, {})", x, z);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Mock pathing to surface (" + x + ", " + z + ")")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        }
+
+        @Override
+        public PathResult navigateToYLevel(int y) {
+            log.info("[MOCK] navigateToYLevel({})", y);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Mock going to Y=" + y)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        }
+
+        @Override
+        public PathResult exploreNear(Location center, int radius) {
+            log.info("[MOCK] exploreNear({}, {})", center, radius);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Mock exploring near " + center)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        }
+
+        @Override
+        public PathResult fleeFrom(Location threat, int safeDistance) {
+            log.info("[MOCK] fleeFrom({}, {})", threat, safeDistance);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Mock fleeing from " + threat)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        }
+
+        @Override
+        public PathResult navigateToNearest(List<Location> candidates) {
+            log.info("[MOCK] navigateToNearest({} locations)", candidates.size());
+            return PathResult.builder()
+                    .success(true)
+                    .message("Mock navigating to nearest of " + candidates.size() + " locations")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        }
+
+        @Override
         public void setSafetyMode(boolean enabled) {
             log.info("[MOCK] setSafetyMode({})", enabled);
         }
