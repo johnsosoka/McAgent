@@ -678,12 +678,17 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [x] Update `TestRunner` mock
 - [x] Unit tests
 - [x] Fabric integration validation (in-game test) — PASSED
-- [ ] Merge to `main` (PR opened)
+- [x] Merge to `main` — PR #12 merged, Issues #5 and #6 closed
 
 ### Validation guide
 
 - `llm_memory/issue-5-6-validation-guide.md` — Combined test plan for Issues #5 and #6.
 
+### Related
+
+- **Issue #5** — Closed via PR #12. All 5 advanced pathing tools live.
+- **Issue #6** — Closed via PR #12. All safety/health tools live.
+
 ---
 
-*Next in queue after #6: Issue #7 — Inventory Queries (`checkInventory`, `getInventorySummary`).*
+*Next in queue: Issue #7 — Inventory Queries (`checkInventory`, `getInventorySummary`).*

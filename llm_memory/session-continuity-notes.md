@@ -33,10 +33,10 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 | Issue | Title | Priority | Blockers |
 |-------|-------|----------|----------|
 | #4 | Player / Entity Scanning | **Merged** | — |
-| #5 | Advanced Pathing Goals | **Complete on branch** | — |
-| #6 | Safety Mode & Health Monitoring | **Current sprint** | None |
-| #7 | Inventory Queries | Can be parallel | None |
-| #8 | Building / Placement | Pending #6 | #6 (safety confirmation) |
+| #5 | Advanced Pathing Goals | **Merged** | — |
+| #6 | Safety Mode & Health Monitoring | **Merged** | — |
+| #7 | Inventory Queries | Next sprint | None |
+| #8 | Building / Placement | Pending #7 | #7 (material check) |
 | #10 | Background Observation Loop | Future | Needs #5–#8 capabilities |
 
 ### Architecture Decisions (unchanged)
@@ -47,9 +47,10 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 
 ---
 
-## Active Sprint: Issue #6 — Safety Mode & Health Monitoring
+## Completed Sprints
 
-**Branch:** `issue/6-safety-mode-health-monitoring`
+### Issue #6 — Safety Mode & Health Monitoring (merged)
+**PR:** #12
 
 ### Goals
 - `setSafetyMode(boolean)` — toggles mob avoidance, parkour, sprint, block breaking
