@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-25
 **Branch:** `issue/6-safety-mode-health-monitoring`
-**Status:** Sprint #6 started — Issues #5 and #6 combined for deployment
+**Status:** Sprint #6 complete — validated in-game, PR opened
 
 ---
 

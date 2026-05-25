@@ -677,8 +677,12 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 - [x] Update `Assistant` system prompt
 - [x] Update `TestRunner` mock
 - [x] Unit tests
-- [ ] Fabric integration validation (in-game test)
-- [ ] Merge to `main` (pending human approval)
+- [x] Fabric integration validation (in-game test) — PASSED
+- [ ] Merge to `main` (PR opened)
+
+### Validation guide
+
+- `llm_memory/issue-5-6-validation-guide.md` — Combined test plan for Issues #5 and #6.
 
 ---
 
