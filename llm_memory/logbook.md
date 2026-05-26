@@ -852,8 +852,12 @@ PathResult placeBlock(int x, int y, int z, String blockType);
 
 ### Remaining work
 
-- [ ] Fabric integration validation (in-game test)
-- [ ] Merge to `main` (pending human approval)
+- [x] Fabric integration validation (in-game test) — PASSED. Platform built successfully in-game.
+- [x] Merge to `main` (pending human approval) — MERGED via PR #14
+
+### Validation guide
+
+- `llm_memory/issue-8-validation-guide.md` — Step-by-step in-game test plan.
 
 ### Architectural note
 
@@ -861,4 +865,4 @@ PathResult placeBlock(int x, int y, int z, String blockType);
 
 ---
 
-*Next in queue: Issue #10 — Background Observation Loop (autonomous threat detection and proactive agent behavior). Will be actionable after #8 is merged.*
+*Next in queue: Issue #10 — Background Observation Loop (autonomous threat detection and proactive agent behavior). Now actionable since #5–#8 are all merged.*

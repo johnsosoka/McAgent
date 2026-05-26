@@ -1,8 +1,8 @@
 # McAgent — Session Continuity Notes
 
-**Date:** 2026-05-25
-**Branch:** `issue/8-building-placement`
-**Status:** Sprint #8 started — building & placement capabilities
+**Date:** 2026-05-26
+**Branch:** `main`
+**Status:** Sprint #8 complete — building & placement merged to main, validated in-game
 
 ---
 
@@ -28,7 +28,7 @@ Issues #3–#7 are all **merged to main**:
 - ✅ Pathing behavior: careful / aggressive / default modes
 - ✅ Block avoidance: configurable avoid-breaking list
 - ✅ Inventory queries: hasItem, countItem, getInventorySummary (validated in-game)
-- ✅ Building primitives: buildArea, placeBlockAt (implemented, pending in-game validation)
+- ✅ Building primitives: buildArea, placeBlockAt (validated in-game — platform built successfully)
 - ✅ Material verification before builds
 - ✅ All tests passing (48)
 - ✅ Shadow JAR builds successfully
@@ -40,8 +40,8 @@ Issues #3–#7 are all **merged to main**:
 | #5 | Advanced Pathing Goals | **Merged** | — |
 | #6 | Safety Mode & Health Monitoring | **Merged** | — |
 | #7 | Inventory Queries | **Merged** | None |
-| #8 | Building / Placement | **In progress** | None |
-| #10 | Background Observation Loop | Future | Needs #5–#8 capabilities |
+| #8 | Building / Placement | **Merged** | None |
+| #10 | Background Observation Loop | Next sprint | Needs #5–#8 capabilities — now unblocked |
 
 ### Architecture Decisions (unchanged)
 - Tool-based architecture: `Assistant.chat()` returns `String`, LangChain4j auto-discovers `@Tool` methods
@@ -53,8 +53,8 @@ Issues #3–#7 are all **merged to main**:
 
 ## Completed Sprints
 
-### Issue #8 — Building / Placement (in progress)
-**PR:** #14 (pending)
+### Issue #8 — Building / Placement (merged)
+**PR:** #14
 
 ### Goals
 - `buildPlatform(x1, y1, z1, x2, y2, z2, blockType)` — filled rectangular area via `FillSchematic`

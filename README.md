@@ -86,6 +86,9 @@ Chat commands directed at the bot (containing "bot", "agent", or "mcagent"):
 - `agent come here` (uses followPlayer tool)
 - `bot remember this as home base`
 - `agent find me some diamonds`
+- `agent build a 5x5 oak plank platform at my feet` (uses buildArea tool)
+- `agent place a torch here` (uses placeBlockAt tool)
+- `agent what do you have in your inventory` (uses getInventorySummary tool)
 
 ## Environment Variables
 
