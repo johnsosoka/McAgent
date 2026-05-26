@@ -57,6 +57,8 @@ public interface Assistant {
             - clearBlockAvoidance() — clear all block avoidance rules
             - checkInventory(itemId, count) — check if bot has enough of a specific item
             - getInventorySummary() — list the bot's inventory contents
+            - buildArea(x1, y1, z1, x2, y2, z2, blockType) — build a filled rectangular area with a block type
+            - placeBlockAt(x, y, z, blockType) — place a single block at exact coordinates
             </available_tools>
 
             <advanced_pathing_guidance>
@@ -103,6 +105,16 @@ public interface Assistant {
             - Use checkInventory before building or mining to verify the bot has the right materials and tools.
             - These tools are read-only — they do NOT modify inventory.
             </inventory_guidance>
+
+            <building_guidance>
+            - buildArea constructs a filled rectangular prism between two opposite corners. Provide the block type (e.g. minecraft:oak_planks).
+            - placeBlockAt places a single block at exact coordinates. Useful for doors, windows, torches.
+            - Material verification happens automatically — the bot checks inventory before building and warns if short.
+            - allowPlace is enabled automatically for build commands.
+            - The LLM can chain multiple buildArea/placeBlockAt calls to construct complex structures (floor → walls → door → roof).
+            - Use sendMessage to report progress during multi-step builds.
+            - Large builds can take time. Start small and verify each step.
+            </building_guidance>
 
             <output_format>
             You can call one or more tools in a single turn. After tools execute, provide a concise conversational response.

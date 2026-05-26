@@ -1,14 +1,15 @@
 # McAgent — Session Continuity Notes
 
 **Date:** 2026-05-25
-**Branch:** `issue/6-safety-mode-health-monitoring`
-**Status:** Sprint #6 complete — validated in-game, PR opened
+**Branch:** `issue/8-building-placement`
+**Status:** Sprint #8 started — building & placement capabilities
 
 ---
 
 ## Current State
 
-Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing Goals), and #6 (Safety Mode & Health Monitoring) are all **implemented on this branch**.
+Issues #3–#7 are all **merged to main**:
+- #3 Message Queuing, #4 Player/Entity Scanning, #5 Advanced Pathing, #6 Safety/Health, #7 Inventory Queries
 
 ### What Works (validated in-game)
 - ✅ Message queuing (`BotEventQueue`) with priority scheduling
@@ -27,7 +28,9 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 - ✅ Pathing behavior: careful / aggressive / default modes
 - ✅ Block avoidance: configurable avoid-breaking list
 - ✅ Inventory queries: hasItem, countItem, getInventorySummary (validated in-game)
-- ✅ All tests passing (44)
+- ✅ Building primitives: buildArea, placeBlockAt (implemented, pending in-game validation)
+- ✅ Material verification before builds
+- ✅ All tests passing (48)
 - ✅ Shadow JAR builds successfully
 
 ### Open Issues (backlog)
@@ -37,7 +40,7 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 | #5 | Advanced Pathing Goals | **Merged** | — |
 | #6 | Safety Mode & Health Monitoring | **Merged** | — |
 | #7 | Inventory Queries | **Merged** | None |
-| #8 | Building / Placement | Next sprint | None |
+| #8 | Building / Placement | **In progress** | None |
 | #10 | Background Observation Loop | Future | Needs #5–#8 capabilities |
 
 ### Architecture Decisions (unchanged)
@@ -49,6 +52,30 @@ Issues #3 (Message Queuing), #4 (Player/Entity Scanning), #5 (Advanced Pathing G
 ---
 
 ## Completed Sprints
+
+### Issue #8 — Building / Placement (in progress)
+**PR:** #14 (pending)
+
+### Goals
+- `buildPlatform(x1, y1, z1, x2, y2, z2, blockType)` — filled rectangular area via `FillSchematic`
+- `placeBlock(x, y, z, blockType)` — single block placement at coordinates
+- Material verification via `hasItem()` before building
+- `allowPlace` automatically enabled for build commands
+
+### Interface Targets (all implemented)
+**BotOperations.java:**
+```java
+PathResult buildPlatform(int x1, int y1, int z1, int x2, int y2, int z2, String blockType);
+PathResult placeBlock(int x, int y, int z, String blockType);
+```
+
+**MinecraftTools.java:**
+```java
+@Tool buildArea(x1, y1, z1, x2, y2, z2, blockType)
+@Tool placeBlockAt(x, y, z, blockType)
+```
+
+---
 
 ### Issue #7 — Inventory Queries (merged)
 **PR:** #13

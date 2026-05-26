@@ -753,4 +753,112 @@ After saying `agent come here`, the bot physically arrived at the player's locat
 
 ---
 
-*Next in queue: Issue #8 — Building / Placement (`buildPlatform`, `placeBlock`, `buildSchematic`).*
+---
+
+## 2026-05-25 — Session: Sprint Planning — Issue #8 Building / Placement
+
+**Branch:** `issue/8-building-placement`
+**Issue:** [#8](https://github.com/johnsosoka/McAgent/issues/8)
+**Status:** Sprint started, branch cut from latest `main`
+
+### What we did
+
+1. **Repo audit** — Verified `main` is clean and up-to-date with `origin/main`. PR #13 (Issue #7) fully merged.
+2. **Issue triage** — Reviewed open backlog. Confirmed #8 as the logical next sprint:
+   - Blocker resolved: #7 (inventory queries for material verification) is now merged
+   - Only 2 open issues remain: #8 (building) and #10 (observation loop)
+   - #10 needs #5–#8 capabilities to be actionable, so #8 is the clear next step
+3. **Branch created** — `issue/8-building-placement` cut from latest `main`.
+
+### Goals for this sprint
+
+- `buildPlatform(x1, y1, z1, x2, y2, z2, blockType)` — filled rectangular area via Baritone `FillSchematic`
+- `placeBlock(x, y, z, blockType)` — single block placement at coordinates
+- Material verification using `hasItem()` before starting builds
+- `allowPlace` automatically enabled for build commands
+- Out of scope: `buildSchematic` (external file loading — follow-up enhancement)
+
+### Interface targets
+
+**BotOperations.java:**
+```java
+PathResult buildPlatform(int x1, int y1, int z1, int x2, int y2, int z2, String blockType);
+PathResult placeBlock(int x, int y, int z, String blockType);
+```
+
+**MinecraftTools.java:**
+```java
+@Tool buildArea(x1, y1, z1, x2, y2, z2, blockType)
+@Tool placeBlockAt(x, y, z, blockType)
+```
+
+### Implementation brief
+
+- `llm_memory/issue-8-implementation-brief.md` — Full agent brief with phases, safety considerations, and acceptance criteria.
+
+---
+
+## 2026-05-25 — Session: Implement Issue #8 — Building / Placement
+
+**Branch:** `issue/8-building-placement`
+**Issue:** [#8](https://github.com/johnsosoka/McAgent/issues/8)
+**Status:** Implementation complete, build green, all tests passing
+
+### What we did
+
+1. **Scaffolded `BotOperations` interface** — Added 2 new methods:
+   - `buildPlatform(x1, y1, z1, x2, y2, z2, blockType)` — filled rectangular area via Baritone `FillSchematic`
+   - `placeBlock(x, y, z, blockType)` — single block placement at coordinates
+
+2. **Delegated implementation to agents** — Full brief at `llm_memory/issue-8-implementation-brief.md`.
+
+3. **Implemented in `FabricBaritoneBridge`:**
+   - Both methods wrapped in `ClientThreadExecutor.execute()` for thread safety
+   - `buildPlatform` computes dimensions (abs delta + 1), finds lowest corner as origin, enables `allowPlace`, constructs `FillSchematic`, calls `IBuilderProcess.build()`
+   - `placeBlock` uses `FillSchematic(1, 1, 1)` for single-block placement
+   - Both resolve block type via existing `resolveBlock()` helper
+   - Agent adapted to actual Baritone 1.17.0 API (`IBuilderProcess` with `build(String, ISchematic, Vec3i)`)
+
+4. **Added `@Tool` methods to `MinecraftTools`:**
+   - `buildArea(x1, y1, z1, x2, y2, z2, blockType)` — material verification via `hasItem()` before building, volume = width * height * length
+   - `placeBlockAt(x, y, z, blockType)` — material verification for single block
+   - Both send immediate chat feedback via `chatService.send()`
+   - Returns clear error messages when materials are insufficient
+
+5. **Updated `Assistant.java` system prompt:**
+   - Added 2 new tools to `<available_tools>`
+   - Added `<building_guidance>` section explaining multi-step builds, material verification, and `allowPlace` auto-enable
+
+6. **Updated test layer:**
+   - `TestRunner.MockBotOperations` — implements both new methods with mock data
+   - `MinecraftToolsTest.java` — 4 unit tests (buildArea success/short materials, placeBlockAt success/missing)
+
+### Files changed / created
+
+- `core/src/main/java/com/mcagent/core/service/BotOperations.java` — Added 2 methods.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricBaritoneBridge.java` — Implemented 2 methods + imports.
+- `core/src/main/java/com/mcagent/core/tools/MinecraftTools.java` — Added 2 `@Tool` methods.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Updated system prompt.
+- `core/src/test/java/com/mcagent/core/TestRunner.java` — Mock implementations.
+- `core/src/test/java/com/mcagent/core/tools/MinecraftToolsTest.java` — 4 new tests.
+- `llm_memory/issue-8-implementation-brief.md` — New. Agent brief.
+
+### Build & test results
+
+- `:core:compileJava` — SUCCESS
+- `:core:test` — **48 tests PASSED** (44 existing + 4 new)
+- `:fabric-mod:compileJava` — SUCCESS
+- `:fabric-mod:shadowJar` — SUCCESS
+
+### Remaining work
+
+- [ ] Fabric integration validation (in-game test)
+- [ ] Merge to `main` (pending human approval)
+
+### Architectural note
+
+**LLM as Designer (for now):** Issue #8 delivers builder primitives only. The LLM serves as the dynamic designer, chaining multiple `buildArea`/`placeBlockAt` calls for complex structures. A dedicated `DesignService` will be evaluated after in-game validation if the LLM struggles with complex 3D spatial reasoning.
+
+---
+
+*Next in queue: Issue #10 — Background Observation Loop (autonomous threat detection and proactive agent behavior). Will be actionable after #8 is merged.*

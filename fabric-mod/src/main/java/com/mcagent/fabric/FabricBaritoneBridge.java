@@ -16,7 +16,11 @@ import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.pathing.goals.GoalYLevel;
 import baritone.api.process.ICustomGoalProcess;
 import baritone.api.process.IFollowProcess;
+import baritone.api.process.IBuilderProcess;
 import baritone.api.process.IMineProcess;
+import baritone.api.schematic.FillSchematic;
+import baritone.api.schematic.ISchematic;
+import baritone.api.utils.BlockOptionalMeta;
 import baritone.api.utils.BlockOptionalMetaLookup;
 import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PathResult;
@@ -707,6 +711,60 @@ public class FabricBaritoneBridge implements BotOperations {
                 sb.append(entry.getKey()).append(" x").append(entry.getValue());
             }
             return sb.toString();
+        });
+    }
+
+    @Override
+    public PathResult buildPlatform(int x1, int y1, int z1, int x2, int y2, int z2, String blockType) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: buildPlatform({}, {}, {}, {}, {}, {}, {})", x1, y1, z1, x2, y2, z2, blockType);
+            Block block = resolveBlock(blockType);
+            if (block == null) {
+                return PathResult.builder()
+                        .success(false)
+                        .message("Unknown block type: " + blockType)
+                        .type(PathResult.PathResultType.ERROR)
+                        .build();
+            }
+            int width = Math.abs(x2 - x1) + 1;
+            int height = Math.abs(y2 - y1) + 1;
+            int length = Math.abs(z2 - z1) + 1;
+            BlockPos origin = new BlockPos(Math.min(x1, x2), Math.min(y1, y2), Math.min(z1, z2));
+            BaritoneAPI.getSettings().allowPlace.value = true;
+            IBuilderProcess builder = baritone.getBuilderProcess();
+            ISchematic schematic = new FillSchematic(width, height, length, new BlockOptionalMeta(block));
+            builder.build("platform", schematic, origin);
+            notify("Building " + blockType + " platform " + width + "x" + height + "x" + length);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Building " + blockType + " platform " + width + "x" + height + "x" + length)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        });
+    }
+
+    @Override
+    public PathResult placeBlock(int x, int y, int z, String blockType) {
+        return ClientThreadExecutor.execute(() -> {
+            log.info("Baritone: placeBlock({}, {}, {}, {})", x, y, z, blockType);
+            Block block = resolveBlock(blockType);
+            if (block == null) {
+                return PathResult.builder()
+                        .success(false)
+                        .message("Unknown block type: " + blockType)
+                        .type(PathResult.PathResultType.ERROR)
+                        .build();
+            }
+            BaritoneAPI.getSettings().allowPlace.value = true;
+            IBuilderProcess builder = baritone.getBuilderProcess();
+            ISchematic schematic = new FillSchematic(1, 1, 1, new BlockOptionalMeta(block));
+            builder.build("place", schematic, new BlockPos(x, y, z));
+            notify("Placing " + blockType + " at (" + x + ", " + y + ", " + z + ")");
+            return PathResult.builder()
+                    .success(true)
+                    .message("Placing " + blockType + " at (" + x + ", " + y + ", " + z + ")")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
         });
     }
 }
