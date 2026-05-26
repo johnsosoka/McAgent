@@ -352,5 +352,28 @@ public class TestRunner {
         public String getInventorySummary() {
             return "cobblestone x64, oak_planks x32, bread x16, iron_pickaxe x1";
         }
+
+        @Override
+        public PathResult buildPlatform(int x1, int y1, int z1, int x2, int y2, int z2, String blockType) {
+            log.info("[MOCK] buildPlatform({}, {}, {}, {}, {}, {}, {})", x1, y1, z1, x2, y2, z2, blockType);
+            int width = Math.abs(x2 - x1) + 1;
+            int height = Math.abs(y2 - y1) + 1;
+            int length = Math.abs(z2 - z1) + 1;
+            return PathResult.builder()
+                    .success(true)
+                    .message("Mock building " + blockType + " " + width + "x" + height + "x" + length)
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        }
+
+        @Override
+        public PathResult placeBlock(int x, int y, int z, String blockType) {
+            log.info("[MOCK] placeBlock({}, {}, {}, {})", x, y, z, blockType);
+            return PathResult.builder()
+                    .success(true)
+                    .message("Mock placing " + blockType + " at (" + x + ", " + y + ", " + z + ")")
+                    .type(PathResult.PathResultType.SUCCESS)
+                    .build();
+        }
     }
 }

@@ -15,7 +15,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -394,5 +396,68 @@ class MinecraftToolsTest {
 
         assertThat(result).isEqualTo("cobblestone x64, oak_planks x32");
         verify(bot).getInventorySummary();
+    }
+
+    @Test
+    void buildArea_shouldCallBotAndChat_whenMaterialsSufficient() {
+        when(bot.hasItem("minecraft:oak_planks", 25)).thenReturn(true);
+        when(bot.countItem("minecraft:oak_planks")).thenReturn(64);
+        when(bot.buildPlatform(0, 64, 0, 4, 64, 4, "minecraft:oak_planks")).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Building oak_planks 5x1x5")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.buildArea(0, 64, 0, 4, 64, 4, "minecraft:oak_planks");
+
+        assertThat(result).contains("Building minecraft:oak_planks area 5x1x5");
+        verify(bot).hasItem("minecraft:oak_planks", 25);
+        verify(bot).buildPlatform(0, 64, 0, 4, 64, 4, "minecraft:oak_planks");
+        verify(chatService).send("Building minecraft:oak_planks area 5x1x5");
+    }
+
+    @Test
+    void buildArea_shouldReturnNotEnough_whenMaterialsShort() {
+        when(bot.hasItem("minecraft:oak_planks", 25)).thenReturn(false);
+        when(bot.countItem("minecraft:oak_planks")).thenReturn(10);
+
+        String result = tools.buildArea(0, 64, 0, 4, 64, 4, "minecraft:oak_planks");
+
+        assertThat(result).contains("Not enough minecraft:oak_planks");
+        assertThat(result).contains("Need 25");
+        verify(bot).hasItem("minecraft:oak_planks", 25);
+        verify(bot, never()).buildPlatform(anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void placeBlockAt_shouldCallBotAndChat_whenMaterialAvailable() {
+        when(bot.hasItem("minecraft:torch", 1)).thenReturn(true);
+        when(bot.placeBlock(100, 65, 100, "minecraft:torch")).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Placing torch at (100, 65, 100)")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.placeBlockAt(100, 65, 100, "minecraft:torch");
+
+        assertThat(result).isEqualTo("Placed minecraft:torch at (100, 65, 100)");
+        verify(bot).hasItem("minecraft:torch", 1);
+        verify(bot).placeBlock(100, 65, 100, "minecraft:torch");
+        verify(chatService).send("Placed minecraft:torch at (100, 65, 100)");
+    }
+
+    @Test
+    void placeBlockAt_shouldReturnNoMaterial_whenMissing() {
+        when(bot.hasItem("minecraft:torch", 1)).thenReturn(false);
+
+        String result = tools.placeBlockAt(100, 65, 100, "minecraft:torch");
+
+        assertThat(result).contains("No minecraft:torch in inventory");
+        verify(bot).hasItem("minecraft:torch", 1);
+        verify(bot, never()).placeBlock(anyInt(), anyInt(), anyInt(), any());
     }
 }

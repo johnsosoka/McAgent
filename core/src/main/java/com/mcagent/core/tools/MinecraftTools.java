@@ -407,4 +407,55 @@ public class MinecraftTools {
         log.info("Tool: getInventorySummary");
         return bot.getInventorySummary();
     }
+
+    @Tool("Build a filled rectangular area with a specific block type. Provide two opposite corners. The bot must have enough blocks in inventory.")
+    public String buildArea(
+            @P("Corner 1 X") int x1,
+            @P("Corner 1 Y") int y1,
+            @P("Corner 1 Z") int z1,
+            @P("Corner 2 X") int x2,
+            @P("Corner 2 Y") int y2,
+            @P("Corner 2 Z") int z2,
+            @P("Block type, e.g. minecraft:oak_planks") String blockType) {
+        log.info("Tool: buildArea({}, {}, {}, {}, {}, {}, {})", x1, y1, z1, x2, y2, z2, blockType);
+        int width = Math.abs(x2 - x1) + 1;
+        int height = Math.abs(y2 - y1) + 1;
+        int length = Math.abs(z2 - z1) + 1;
+        int volume = width * height * length;
+        
+        // Material verification
+        boolean hasMaterials = bot.hasItem(blockType, volume);
+        if (!hasMaterials) {
+            int actual = bot.countItem(blockType);
+            chatService.send("Not enough " + blockType + ". Need " + volume + ", have " + actual);
+            return "Not enough " + blockType + ". Need " + volume + " blocks, only have " + actual;
+        }
+        
+        var result = bot.buildPlatform(x1, y1, z1, x2, y2, z2, blockType);
+        if (result.isSuccess()) {
+            chatService.send("Building " + blockType + " area " + width + "x" + height + "x" + length);
+            return "Building " + blockType + " area " + width + "x" + height + "x" + length + " at (" + x1 + ", " + y1 + ", " + z1 + ") to (" + x2 + ", " + y2 + ", " + z2 + ")";
+        }
+        return "Cannot build: " + result.getMessage();
+    }
+
+    @Tool("Place a single block at specific coordinates. The bot must have the block in inventory.")
+    public String placeBlockAt(
+            @P("X coordinate") int x,
+            @P("Y coordinate") int y,
+            @P("Z coordinate") int z,
+            @P("Block type, e.g. minecraft:torch") String blockType) {
+        log.info("Tool: placeBlockAt({}, {}, {}, {})", x, y, z, blockType);
+        boolean hasMaterials = bot.hasItem(blockType, 1);
+        if (!hasMaterials) {
+            chatService.send("No " + blockType + " in inventory");
+            return "No " + blockType + " in inventory to place";
+        }
+        var result = bot.placeBlock(x, y, z, blockType);
+        if (result.isSuccess()) {
+            chatService.send("Placed " + blockType + " at (" + x + ", " + y + ", " + z + ")");
+            return "Placed " + blockType + " at (" + x + ", " + y + ", " + z + ")";
+        }
+        return "Cannot place block: " + result.getMessage();
+    }
 }
