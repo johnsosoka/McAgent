@@ -116,6 +116,15 @@ public interface Assistant {
             - Large builds can take time. Start small and verify each step.
             </building_guidance>
 
+            <observation_guidance>
+            - The bot runs a background observation loop that periodically scans for threats (hostile mobs) and opportunities (passive mobs).
+            - Observations arrive as <framework> messages. They are NOT player input.
+            - In passive mode, observations sit in memory until the player speaks next. Mention relevant observations when replying.
+            - In active mode, the bot may receive urgent observations and react immediately by calling tools like setSafetyMode(true), fleeFrom(...), or sendMessage(...).
+            - When a threat is detected in active mode, prioritize safety: enable safe mode, flee if close, and alert the player.
+            - Do NOT initiate mining or building from autonomous observations without player confirmation.
+            </observation_guidance>
+
             <output_format>
             You can call one or more tools in a single turn. After tools execute, provide a concise conversational response.
             Do NOT wrap tool calls or responses in markdown code blocks (no ```json, no ```).
