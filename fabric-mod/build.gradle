@@ -47,10 +47,22 @@ dependencies {
     compileOnly 'org.springframework.boot:spring-boot-starter-data-jpa'
 
     // Lombok
-    compileOnly 'org.projectlombok:lombok:1.18.38'
-    annotationProcessor 'org.projectlombok:lombok:1.18.38'
+    compileOnly 'org.projectlombok:lombok:1.18.46'
+    annotationProcessor 'org.projectlombok:lombok:1.18.46'
 
     // Shadow plugin will bundle core's transitive dependencies
+
+    // Testing
+    testImplementation platform('org.springframework.boot:spring-boot-dependencies:3.4.0')
+    testImplementation('org.springframework.boot:spring-boot-starter-test:3.4.0') {
+        exclude group: 'ch.qos.logback', module: 'logback-classic'
+        exclude group: 'ch.qos.logback', module: 'logback-core'
+        exclude group: 'org.apache.logging.log4j', module: 'log4j-to-slf4j'
+        exclude group: 'org.slf4j', module: 'slf4j-simple'
+    }
+    testImplementation 'org.assertj:assertj-core:3.27.0'
+    testCompileOnly 'org.projectlombok:lombok:1.18.46'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.46'
 }
 
 java {
@@ -124,4 +136,11 @@ shadowJar {
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release = 25
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+    }
 }

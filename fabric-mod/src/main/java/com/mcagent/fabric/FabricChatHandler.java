@@ -1,9 +1,8 @@
 package com.mcagent.fabric;
 
+import com.mcagent.fabric.observer.AutonomousObserver;
 import com.mcagent.fabric.queue.BotEventQueue;
 import com.mcagent.fabric.queue.EventPriority;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import net.minecraft.client.Minecraft;
 
 import java.util.Arrays;
@@ -11,15 +10,24 @@ import java.util.Comparator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Handles incoming Minecraft chat messages and enqueues them for LLM processing.
  * Replaces the Forge ChatEventHandler with Fabric event registration.
  */
-@Slf4j
-@RequiredArgsConstructor
 public class FabricChatHandler {
+    private static final Logger log = LoggerFactory.getLogger(FabricChatHandler.class);
+
+    public FabricChatHandler(final BotEventQueue botEventQueue, final AutonomousObserver autonomousObserver) {
+        this.botEventQueue = botEventQueue;
+        this.autonomousObserver = autonomousObserver;
+    }
+
 
     private final BotEventQueue botEventQueue;
+    private final AutonomousObserver autonomousObserver;
 
     private static final Pattern CHAT_PATTERN = Pattern.compile("^<(\\w+)>\\s*(.+)");
     private static final Pattern ALTERNATIVE_PATTERN = Pattern.compile("^(\\w+):\\s*(.+)");
@@ -48,6 +56,10 @@ public class FabricChatHandler {
             return;
         }
 
+        if (handleToggleCommand(command)) {
+            return;
+        }
+
         EventPriority priority = resolvePriority(command);
         botEventQueue.enqueueCommand(playerName, command, priority);
     }
@@ -61,6 +73,35 @@ public class FabricChatHandler {
             return EventPriority.CANCEL;
         }
         return EventPriority.NORMAL;
+    }
+
+    /**
+     * Detect observer toggle commands and handle them immediately without
+     * enqueuing to the LLM pipeline.
+     */
+    private boolean handleToggleCommand(String command) {
+        String lower = command.toLowerCase();
+        if (lower.equals("watch") || lower.equals("start watching") || lower.equals("observe")) {
+            autonomousObserver.setEnabled(true);
+            FabricChatSender.send("Observation enabled.");
+            return true;
+        }
+        if (lower.equals("stop watching") || lower.equals("stop observing") || lower.equals("disable observation")) {
+            autonomousObserver.setEnabled(false);
+            FabricChatSender.send("Observation disabled.");
+            return true;
+        }
+        if (lower.equals("passive mode") || lower.equals("set passive")) {
+            autonomousObserver.setMode("passive");
+            FabricChatSender.send("Observation mode set to passive.");
+            return true;
+        }
+        if (lower.equals("active mode") || lower.equals("set active")) {
+            autonomousObserver.setMode("active");
+            FabricChatSender.send("Observation mode set to active. I'll act on threats automatically.");
+            return true;
+        }
+        return false;
     }
 
     /**

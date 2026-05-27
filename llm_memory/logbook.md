@@ -866,3 +866,86 @@ PathResult placeBlock(int x, int y, int z, String blockType);
 ---
 
 *Next in queue: Issue #10 — Background Observation Loop (autonomous threat detection and proactive agent behavior). Now actionable since #5–#8 are all merged.*
+
+---
+
+## 2026-05-27 — Session: Implement Issue #10 — Background Observation Loop
+
+**Branch:** `feature/issue-10-background-observation-loop`
+**Issue:** [#10](https://github.com/johnsosoka/McAgent/issues/10)
+**Status:** Implementation complete, code review passed, build green, all tests passing
+
+### What we did
+
+1. **Scaffolded architecture** — Design doc at `llm_memory/issue-10-design-doc.md`. John's decisions:
+   - Track both hostile AND passive mobs
+   - Background observation is config-based and enabled by default
+   - Urgent queue for active mode
+   - Support individual (default) and summary message modes
+
+2. **Created `AutonomousObserver`** (`fabric-mod/observer/`):
+   - Tick-based world scanning hooked into `McAgentFabricMod.onClientTick()`
+   - Threat detection via `BotOperations.getNearbyThreats(radius)` (16 hostile mob types)
+   - Opportunity detection via `BotOperations.getNearbyEntities(type, radius)` (configurable passive mob list: Pig, Cow, Chicken, Sheep by default)
+   - Debounce by 4-block spatial bucket + configurable time window (default 10s)
+   - Individual mode: publishes closest threat/opportunity per scan
+   - Summary mode: aggregates all into one `Status scan: threats: ..., opportunities: ...` message
+   - Passive mode: publishes as `<framework>` messages via `BotEventQueue.publishFramework()`
+   - Active mode: triggers immediate LLM call via `BotEventQueue.triggerUrgentFramework()` on dedicated urgent dispatcher thread
+
+3. **Extended queue and LLM infrastructure:**
+   - `BotEventQueue` — added `urgentDispatcher` (single-thread executor) for active-mode LLM invocation
+   - `LangChain4jService.processUrgentObservation()` — injects framework context and calls `assistant.chat()` without player input
+   - `chatMemory` access synchronized across `processInput`, `addFrameworkContext`, `injectPlayerContext`, and `processUrgentObservation` to prevent `ConcurrentModificationException` from concurrent inbound + urgent threads
+
+4. **Wired lifecycle and chat toggles:**
+   - `McAgentFabricMod` — instantiates observer in `initSpringContext()`, calls `onTick()` after Baritone bridge, nulls on shutdown
+   - `FabricChatHandler` — intercepts toggle commands before LLM queue:
+     - `agent watch` / `start watching` / `observe` → enable
+     - `agent stop watching` / `stop observing` / `disable observation` → disable
+     - `agent passive mode` / `set passive` → passive mode
+     - `agent active mode` / `set active` → active mode
+   - Toggle replies sent immediately via `FabricChatSender.send()`
+
+5. **Updated configuration and system prompt:**
+   - `BotProperties.ObservationProperties` — `enabled`, `scanIntervalTicks`, `threatRadius`, `passiveRadius`, `mode`, `messageMode`, `debounceSeconds`, `trackPassiveMobs`, `passiveMobTypes`
+   - `Assistant.java` — added `<observation_guidance>` section
+
+6. **Unit tests:**
+   - `AutonomousObserverTest` — 11 Mockito-based tests
+
+7. **Code review findings & fixes:**
+   - **Critical:** Fixed concurrent `chatMemory` access — all mutations wrapped in `synchronized (chatMemory)`
+   - **Thread safety:** `AutonomousObserver.enabled` → `volatile`, `debounceMap` → `ConcurrentHashMap`
+   - **Lombok compatibility:** Fabric-mod uses explicit `LoggerFactory.getLogger()` instead of `@Slf4j`
+
+### Files changed / created
+
+- `fabric-mod/src/main/java/com/mcagent/fabric/observer/AutonomousObserver.java` — New.
+- `fabric-mod/src/test/java/com/mcagent/fabric/observer/AutonomousObserverTest.java` — New. 11 tests.
+- `core/src/main/java/com/mcagent/core/config/BotProperties.java` — Added `ObservationProperties`.
+- `core/src/main/java/com/mcagent/core/service/LangChain4jService.java` — Added `processUrgentObservation()`, synchronized `chatMemory`.
+- `core/src/main/java/com/mcagent/core/service/Assistant.java` — Added `<observation_guidance>`.
+- `fabric-mod/src/main/java/com/mcagent/fabric/McAgentFabricMod.java` — Wired observer lifecycle.
+- `fabric-mod/src/main/java/com/mcagent/fabric/FabricChatHandler.java` — Toggle command interception.
+- `fabric-mod/src/main/java/com/mcagent/fabric/queue/BotEventQueue.java` — Added `triggerUrgentFramework()` + `urgentDispatcher`.
+- `fabric-mod/build.gradle` — Test deps + Lombok bump.
+- `llm_memory/issue-10-design-doc.md` — New.
+- `llm_memory/issue-10-code-review.md` — New.
+
+### Build & test results
+
+- `:core:compileJava` — SUCCESS
+- `:core:test` — **48 tests PASSED**
+- `:fabric-mod:compileJava` — SUCCESS
+- `:fabric-mod:test` — **11 tests PASSED**
+- `:fabric-mod:shadowJar` — SUCCESS
+
+### Remaining work
+
+- [ ] Manual in-game integration test (spawn hostile mob, verify bot reacts)
+- [ ] Merge to `main` (pending human approval)
+
+---
+
+*Next in queue: Manual validation of Issue #10 in-game before merge.*
