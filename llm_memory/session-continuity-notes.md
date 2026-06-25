@@ -1,8 +1,17 @@
 # McAgent — Session Continuity Notes
 
-**Date:** 2026-05-27
-**Branch:** `feature/issue-10-background-observation-loop`
-**Status:** Sprint #10 complete — background observation loop implemented, all tests passing
+**Date:** 2026-06-25
+**Branch:** `feature/sprint-11-foundation` (off `feature/issue-10-background-observation-loop`)
+**Status:** Sprint 11 (Operations & Trust Foundation) complete — 172 tests, 0 failures. Shadow JAR builds. Awaiting in-game validation.
+
+**Quick links:**
+- Strategic review: `llm_memory/strategic-review/SYNTHESIS-and-roadmap.md`
+- E2E validation guides: `llm_memory/e2e-validation/sprint-NN-validation.md`
+- Sprint 11 completion: `llm_memory/sprint-11/SPRINT-11-COMPLETE.md`
+- Per-bundle reports: `llm_memory/sprint-11/bundle-{a,b,c,d}-complete.md` + `*-followup-complete.md`
+- Sprint 12–15 implementation briefs: `llm_memory/sprint-NN/IMPLEMENTATION-BRIEF.md`
+
+**Important:** Issue #10 PR (#15) still open on `feature/issue-10-background-observation-loop`. Sprint 11 was branched off it (so observer code is included). When #10 merges, rebase sprint branches onto main.
 
 ---
 

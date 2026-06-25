@@ -4,6 +4,56 @@
 
 ---
 
+## 2026-06-25 — Session: Strategic Review & Sprint 11 Foundation
+
+**Branch:** `feature/sprint-11-foundation` (off `feature/issue-10-background-observation-loop`)
+**Issues:** N/A — initial sprint planning for the autonomy/command product vision.
+
+### What we did
+
+1. **CLAUDE.md authored** — repo-level architecture guide for future Claude Code sessions (build commands, dual-JDK, three-channel event queue, mixin conventions, shadow-JAR rules).
+2. **Strategic review** — dispatched 5 specialist agents in parallel (autonomous-mode architect, command-mode architect, UX expert, code-reviewer, prior-art researcher) plus an own pass on observability/correctness. Six reports synthesized into `llm_memory/strategic-review/SYNTHESIS-and-roadmap.md` with a ranked 5-sprint roadmap (Sprints 11–15) and 8 decision points for John.
+3. **E2E validation guides** — `llm_memory/e2e-validation/` with one self-contained guide per sprint. Each lists prerequisites, scenarios with pass/fail criteria, and triage cheatsheets.
+4. **Sprint 11 implementation** — four bundles (A: memory + race fix; B: outbound + hard-stop; C: telemetry + watchdog; D: prompt cleanup + hygiene), each delegated, code-reviewed, and follow-up-fixed. **172 tests, 0 failures. Shadow JAR builds.**
+
+### Sprint 11 outcomes
+
+- Tiered `LayeredChatMemory` replaces the 20-message ring buffer (Bundle A).
+- `processUrgentObservation` atomic — race + double-injection fix (Bundle A Q5).
+- Outbound chat correctness — drainer/sender contract collapse; `RATE_LIMITED` retries (Bundle B F2).
+- Hard-stop + `agent status` bypass — instant interrupt, no LLM round-trip (Bundle B F3).
+- `JobTracker` skeleton — current-job state surface for status (Bundle B).
+- Telemetry stack — `Counters`, `CorrelationId` (MDC), `RunLog` (JSONL, 50 MB rollover), `Watchdog` (30s stall detection with cooldown) (Bundle C F4 + F5).
+- Manual tool catalogue removed from system prompt — auto-discovery via `@Tool` (Bundle D Q6).
+- Voice refinement (`<voice_guidance>`) — terse, structured, no filler (Bundle D P1).
+- `BLOCK_MAP` deleted; registry-based block resolution (Bundle D P2).
+- `SafetyValidator` wired for MINE + BUILD with dangerous-block + depth checks (Bundle D P3).
+- `seenInWindow` bounded in `FrameworkMessageBuffer` — no memory leak under long runs (Bundle D P4).
+
+### Files changed (delta)
+
+- 7 new files in `core/.../telemetry/` and `core/.../memory/chat/`.
+- ~20 modified files across `core/` and `fabric-mod/`.
+- 14 test classes added or extended.
+
+### Known deferrals
+
+- In-flight LLM call continues after `agent stop` — flagged for Sprint 14.
+- Synchronous summarization holds chatMemory lock — flagged for Sprint 13.
+- LLM token/cost counters — deferred to Sprint 14 P9.
+- UX R5 (per-block chat in `placeBlockAt`) — deferred to Sprint 12 building work.
+
+### Decisions for John
+
+8 decisions in `llm_memory/strategic-review/SYNTHESIS-and-roadmap.md` §5 — not blocking Sprint 11 but needed before Sprint 13. Notably: Plan schema format, persistent session scoping, item-recovery-on-death policy, per-session cost cap.
+
+### Next steps
+
+- Hand off `llm_memory/e2e-validation/sprint-11-validation.md` to John for in-game validation.
+- Begin Sprint 12 (Bot Stays Alive — survival reflexes + death handler) on parallel branch.
+
+---
+
 ## 2026-05-24 — Session: Expand LLM Capabilities Planning
 
 **Branch:** `feature/expand-llm-capabilities`
