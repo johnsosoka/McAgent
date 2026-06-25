@@ -1,11 +1,13 @@
 package com.mcagent.fabric.queue;
 
+import com.mcagent.core.telemetry.Counters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -32,6 +34,7 @@ public class FrameworkMessageBuffer {
     private final int capacity;
     private final long throttleMs;
     private final Consumer<String> consumer;
+    private final Counters counters;
 
     private final ScheduledExecutorService scheduler;
     private volatile long lastDeliveryTime;
@@ -43,11 +46,27 @@ public class FrameworkMessageBuffer {
      * @param consumer   callback that receives batched / throttled messages
      */
     public FrameworkMessageBuffer(int capacity, long throttleMs, Consumer<String> consumer) {
+        this(capacity, throttleMs, consumer, new Counters());
+    }
+
+    /**
+     * @param capacity   max messages to retain in the ring buffer
+     * @param throttleMs minimum millis between deliveries to the consumer
+     * @param consumer   callback that receives batched / throttled messages
+     * @param counters   counter registry for operational metrics
+     */
+    public FrameworkMessageBuffer(int capacity, long throttleMs, Consumer<String> consumer, Counters counters) {
         this.capacity = capacity;
         this.throttleMs = throttleMs;
         this.consumer = consumer;
+        this.counters = counters;
         this.buffer = new ArrayDeque<>(capacity);
-        this.seenInWindow = new HashSet<>();
+        this.seenInWindow = Collections.newSetFromMap(new LinkedHashMap<>() {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<String, Boolean> eldest) {
+                return size() > capacity;
+            }
+        });
         this.lastDeliveryTime = 0;
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "mc-agent-framework-buffer");
@@ -71,14 +90,18 @@ public class FrameworkMessageBuffer {
         String normalized = message.trim();
         if (seenInWindow.contains(normalized)) {
             LOGGER.debug("Deduplicated framework message: {}", normalized);
+            counters.inc("framework.deduped");
             return;
         }
         if (buffer.size() >= capacity) {
             String dropped = buffer.pollFirst();
+            seenInWindow.remove(dropped);
             LOGGER.debug("Dropped oldest framework message (capacity {}): {}", capacity, dropped);
+            counters.inc("framework.dropped");
         }
         buffer.addLast(normalized);
         seenInWindow.add(normalized);
+        counters.inc("framework.published");
     }
 
     /**
@@ -96,6 +119,7 @@ public class FrameworkMessageBuffer {
         String payload;
         if (buffer.size() == 1) {
             payload = buffer.pollFirst();
+            counters.inc("framework.delivered");
         } else {
             // Batch digest
             StringBuilder sb = new StringBuilder();
@@ -107,6 +131,8 @@ public class FrameworkMessageBuffer {
                 count++;
             }
             payload = sb.toString();
+            counters.inc("framework.delivered");
+            counters.inc("framework.batched");
         }
 
         seenInWindow.clear();
@@ -146,5 +172,32 @@ public class FrameworkMessageBuffer {
     public void shutdown() {
         shutdown = true;
         scheduler.shutdownNow();
+    }
+
+    /**
+     * Returns the number of messages currently tracked in the deduplication window.
+     *
+     * @VisibleForTesting
+     */
+    synchronized int seenInWindowSize() {
+        return seenInWindow.size();
+    }
+
+    /**
+     * Returns the number of messages currently held in the ring buffer.
+     *
+     * @VisibleForTesting
+     */
+    synchronized int bufferSize() {
+        return buffer.size();
+    }
+
+    /**
+     * Returns {@code true} if the given message is currently tracked in the dedup window.
+     *
+     * @VisibleForTesting
+     */
+    synchronized boolean isSeenInWindow(String message) {
+        return seenInWindow.contains(message);
     }
 }

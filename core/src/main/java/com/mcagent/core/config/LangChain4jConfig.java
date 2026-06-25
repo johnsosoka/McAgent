@@ -1,8 +1,10 @@
 package com.mcagent.core.config;
 
+import com.mcagent.core.memory.chat.LayeredChatMemory;
+import com.mcagent.core.memory.chat.RollingSummaryService;
 import com.mcagent.core.service.Assistant;
 import com.mcagent.core.tools.MinecraftTools;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
+import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -44,13 +46,19 @@ public class LangChain4jConfig {
     }
 
     @Bean
-    public MessageWindowChatMemory chatMemory(BotProperties botProps) {
-        return MessageWindowChatMemory.withMaxMessages(botProps.getChat().getMaxHistory());
+    public RollingSummaryService rollingSummaryService(ChatModel chatModel, BotProperties botProps) {
+        return new RollingSummaryService(chatModel, botProps.getChat().getSummaryMaxChars());
+    }
+
+    @Bean
+    public LayeredChatMemory chatMemory(BotProperties botProps, RollingSummaryService rollingSummaryService) {
+        BotProperties.ChatProperties chat = botProps.getChat();
+        return new LayeredChatMemory(chat.getEffectiveWorkingWindow(), chat.getSummaryTrigger(), rollingSummaryService);
     }
 
     @Bean
     public Assistant assistant(ChatModel chatModel,
-                               MessageWindowChatMemory chatMemory,
+                               ChatMemory chatMemory,
                                MinecraftTools tools) {
         return AiServices.builder(Assistant.class)
                 .chatModel(chatModel)

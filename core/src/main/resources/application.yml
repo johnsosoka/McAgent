@@ -5,8 +5,15 @@ bot:
     - "agent"
     - "hey bot"
   chat:
+    working-window: 12
+    summary-trigger: 8
+    summary-max-chars: 800
+    # max-history is deprecated — use working-window instead. Left here for
+    # backwards compatibility with older config files; value is ignored.
     max-history: 20
     response-timeout-seconds: 30
+    # Mojang signed-chat floor is 1000ms; 1200ms is a safe margin.
+    min-interval-ms: 1200
   safety:
     require-confirmation-for-dangerous: true
     dangerous-blocks:

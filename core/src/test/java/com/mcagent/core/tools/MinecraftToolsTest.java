@@ -5,9 +5,13 @@ import com.mcagent.core.model.PathResult;
 import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
+import com.mcagent.core.service.SafetyValidator;
 import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.PlayerNoteService;
 import com.mcagent.core.memory.VectorMemoryService;
+import com.mcagent.core.telemetry.Counters;
+import com.mcagent.core.telemetry.JobTracker;
+import com.mcagent.core.telemetry.RunLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +32,10 @@ class MinecraftToolsTest {
     private LocationMemoryService locationMemory;
     private VectorMemoryService vectorMemory;
     private PlayerNoteService playerNoteService;
+    private SafetyValidator safetyValidator;
+    private JobTracker jobTracker;
+    private Counters counters;
+    private RunLog runLog;
     private MinecraftTools tools;
 
     @BeforeEach
@@ -37,7 +45,15 @@ class MinecraftToolsTest {
         vectorMemory = mock(VectorMemoryService.class);
         playerNoteService = mock(PlayerNoteService.class);
         chatService = mock(ChatService.class);
-        tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService);
+        safetyValidator = mock(SafetyValidator.class);
+        jobTracker = mock(JobTracker.class);
+        counters = mock(Counters.class);
+        runLog = mock(RunLog.class);
+        // Default: all actions approved
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.approved());
+        when(bot.getCurrentPosition()).thenReturn(new BotOperations.Location(0, 64, 0));
+        tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService, safetyValidator, jobTracker, counters, runLog);
     }
 
     @Test
@@ -458,6 +474,70 @@ class MinecraftToolsTest {
 
         assertThat(result).contains("No minecraft:torch in inventory");
         verify(bot).hasItem("minecraft:torch", 1);
+        verify(bot, never()).placeBlock(anyInt(), anyInt(), anyInt(), any());
+    }
+
+    // --- cancelCurrentOperation ---
+
+    @Test
+    void cancelCurrentOperation_callsBotCancelAndClearsJob() {
+        String result = tools.cancelCurrentOperation();
+
+        verify(bot).cancel();
+        verify(jobTracker).clearJob();
+        assertThat(result).isEqualTo("Cancelled current operation.");
+    }
+
+    // --- SafetyValidator wiring ---
+
+    @Test
+    void mineResource_safetyValidatorRejects_returnsReasonWithoutCallingBot() {
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.rejected("Cannot interact with TNT — listed as dangerous in safety config."));
+
+        String result = tools.mineResource("TNT", 1, null);
+
+        assertThat(result).contains("Cannot interact with TNT");
+        verify(bot, never()).mine(any(), anyInt(), any());
+    }
+
+    @Test
+    void mineResource_safetyValidatorApproves_callsBot() {
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.approved());
+        when(bot.mine(anyString(), anyInt(), any())).thenReturn(
+                PathResult.builder()
+                        .success(true)
+                        .message("Mining started")
+                        .type(PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        String result = tools.mineResource("iron_ore", 32, 64);
+
+        assertThat(result).contains("Mining iron_ore");
+        verify(bot).mine("iron_ore", 32, 64);
+    }
+
+    @Test
+    void buildArea_safetyValidatorRejects_returnsReasonWithoutCallingBot() {
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.rejected("Cannot interact with TNT — listed as dangerous in safety config."));
+
+        String result = tools.buildArea(0, 64, 0, 4, 64, 4, "tnt");
+
+        assertThat(result).contains("Cannot interact with TNT");
+        verify(bot, never()).buildPlatform(anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void placeBlockAt_safetyValidatorRejects_returnsReasonWithoutCallingBot() {
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.rejected("Cannot interact with LAVA — listed as dangerous in safety config."));
+
+        String result = tools.placeBlockAt(0, 64, 0, "minecraft:lava");
+
+        assertThat(result).contains("Cannot interact with LAVA");
         verify(bot, never()).placeBlock(anyInt(), anyInt(), anyInt(), any());
     }
 }

@@ -66,6 +66,10 @@ public class AutonomousObserver {
         return enabled;
     }
 
+    public String getMode() {
+        return config.getMode();
+    }
+
     public void setMode(String mode) {
         if (!"passive".equalsIgnoreCase(mode) && !"active".equalsIgnoreCase(mode)) {
             throw new IllegalArgumentException("mode must be 'passive' or 'active'");

@@ -4,52 +4,118 @@ import net.minecraft.client.Minecraft;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
  * Thread-safe utility for sending chat messages from the Minecraft client.
  * All sends are scheduled on the main client thread to avoid data races.
- * Rate-limited to prevent server spam kicks.
+ *
+ * <p>Rate limit is configurable via {@link #setMinIntervalMs(long)}, defaulting to 1200ms —
+ * Mojang's signed-chat hard floor is 1000ms; 1200ms is a safe margin.</p>
+ *
+ * <p>Rather than silently dropping rate-limited messages (old behaviour), {@link #send} now
+ * returns a {@link SendResult} so callers can decide whether to retry.</p>
  */
 public final class FabricChatSender {
-    private static final Logger LOGGER = LoggerFactory.getLogger("mc_agent");
-    private static final int MAX_MESSAGE_LENGTH = 250;
-    private static final long MIN_INTERVAL_MS = 3000; // max 1 msg per 3s
 
-    private static long lastSendTime = 0;
+    private static final Logger LOGGER = LoggerFactory.getLogger(FabricChatSender.class);
+    private static final int MAX_MESSAGE_LENGTH = 250;
+
+    /**
+     * Default rate-limit interval (ms). Mojang's signed-chat enforcement floor is 1000ms;
+     * 1200ms gives a safe margin above it.
+     * <p>
+     * Declared {@code volatile} so that the Spring-wired override from {@code BotProperties}
+     * is visible to all threads without synchronisation overhead.
+     */
+    public static volatile long MIN_INTERVAL_MS = 1200;
+
+    private static final AtomicLong lastSendTime = new AtomicLong(0);
 
     private FabricChatSender() {
         // utility class
     }
 
     /**
-     * Send a message to Minecraft chat as the bot, safely from any thread.
-     * Rate-limited: messages sent faster than 1 per 3 seconds are dropped.
-     * Illegal characters are stripped to prevent disconnects.
+     * Override the rate-limit interval. Called once at Spring context startup from
+     * {@code FabricModConfig} with the value from {@code bot.chat.min-interval-ms}.
      */
-    public static void send(String message) {
-        if (message == null || message.isBlank()) {
-            return;
-        }
-
-        long now = System.currentTimeMillis();
-        long elapsed = now - lastSendTime;
-        if (elapsed < MIN_INTERVAL_MS) {
-            LOGGER.debug("Chat send rate-limited ({} ms since last)", elapsed);
-            return;
-        }
-        lastSendTime = now;
-
-        String sanitized = sanitize(message);
-        if (sanitized.isBlank()) {
-            return;
-        }
-
-        Minecraft client = Minecraft.getInstance();
-        client.execute(() -> sendOnClientThread(client, sanitized));
+    public static void setMinIntervalMs(long ms) {
+        MIN_INTERVAL_MS = ms;
     }
 
     /**
-     * Strip characters that are illegal in Minecraft chat/commands:
-     * newlines, backticks, control chars, and other problematic symbols.
+     * Possible outcomes of a {@link #send} call, allowing callers to react
+     * appropriately (e.g. leave a rate-limited message at the head of the queue).
+     */
+    public enum SendResult {
+        /** Message was dispatched to the client thread. */
+        SENT,
+        /** Message was skipped because not enough time has passed since the last send. */
+        RATE_LIMITED,
+        /** Message was null or blank — nothing to send. */
+        EMPTY,
+        /** Client is not currently connected; message cannot be sent. */
+        DISCONNECTED
+    }
+
+    /**
+     * Attempt to send a chat message. Returns a {@link SendResult} describing the outcome.
+     * Rate-limit tracking uses a CAS loop so concurrent callers never produce a race.
+     */
+    public static SendResult send(String message) {
+        if (message == null || message.isBlank()) {
+            return SendResult.EMPTY;
+        }
+
+        long minInterval = MIN_INTERVAL_MS;
+        long now = System.currentTimeMillis();
+        long previous = lastSendTime.get();
+        while (true) {
+            if (now - previous < minInterval) {
+                LOGGER.debug("Chat send rate-limited ({} ms since last)", now - previous);
+                return SendResult.RATE_LIMITED;
+            }
+            if (lastSendTime.compareAndSet(previous, now)) {
+                break;
+            }
+            // Another thread updated lastSendTime between our get() and CAS; re-read and retry.
+            previous = lastSendTime.get();
+        }
+
+        String sanitized = sanitize(message);
+        if (sanitized.isBlank()) {
+            return SendResult.EMPTY;
+        }
+
+        Minecraft client = Minecraft.getInstance();
+        if (client.player == null || client.player.connection == null) {
+            LOGGER.warn("Cannot send chat message: not connected");
+            return SendResult.DISCONNECTED;
+        }
+
+        client.execute(() -> sendOnClientThread(client, sanitized));
+        return SendResult.SENT;
+    }
+
+    /**
+     * Pure decision helper — extracted so it can be tested without a Minecraft instance.
+     * Returns the {@link SendResult} that {@link #send} would return given these inputs,
+     * but does NOT mutate any state.
+     */
+    static SendResult decide(long now, long prevLastSendTime, long minIntervalMs, String message) {
+        if (message == null || message.isBlank()) {
+            return SendResult.EMPTY;
+        }
+        if (now - prevLastSendTime < minIntervalMs) {
+            return SendResult.RATE_LIMITED;
+        }
+        return SendResult.SENT;
+    }
+
+    /**
+     * Strip characters that are illegal in Minecraft chat:
+     * newlines, backticks, control characters, and other non-printable symbols.
      */
     private static String sanitize(String message) {
         return message
@@ -57,7 +123,7 @@ public final class FabricChatSender {
                 .replace('\r', ' ')
                 .replace('\t', ' ')
                 .replace('`', '\'')
-                .replaceAll("[^\\x20-\\x7E]", "") // keep only printable ASCII
+                .replaceAll("[^\\x20-\\x7E]", "")
                 .trim();
     }
 
@@ -72,10 +138,8 @@ public final class FabricChatSender {
         }
 
         if (message.startsWith("/")) {
-            // Actual command — strip leading slash
             client.player.connection.sendCommand(message.substring(1));
         } else {
-            // Normal chat — use signed chat path (properly handles 1.19+ chat signing)
             client.player.connection.sendChat(message);
         }
     }

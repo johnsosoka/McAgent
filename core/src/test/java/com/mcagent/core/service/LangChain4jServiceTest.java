@@ -1,5 +1,7 @@
 package com.mcagent.core.service;
 
+import com.mcagent.core.telemetry.Counters;
+import com.mcagent.core.telemetry.RunLog;
 import dev.langchain4j.memory.ChatMemory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +14,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Unit tests for {@link LangChain4jService} using Mockito.
+ *
+ * <p>These tests verify wiring and error-handling behaviour using mocked
+ * collaborators. Real-memory and concurrency tests live in
+ * {@link LangChain4jServiceRealMemoryTest} to avoid Mockito's strict-stub
+ * enforcement interfering with inline {@code mock()} calls.</p>
+ */
 @ExtendWith(MockitoExtension.class)
 class LangChain4jServiceTest {
 
@@ -23,6 +33,12 @@ class LangChain4jServiceTest {
 
     @Mock
     private BotOperations bot;
+
+    @Mock
+    private Counters counters;
+
+    @Mock
+    private RunLog runLog;
 
     @InjectMocks
     private LangChain4jService service;
@@ -48,5 +64,44 @@ class LangChain4jServiceTest {
         String result = service.processInput("complex query", "player-2");
 
         assertThat(result).isNull();
+    }
+
+    @Test
+    void processInput_incrementsLlmCallsCounter() {
+        when(bot.getPlayerPosition("p")).thenReturn(java.util.Optional.empty());
+        when(assistant.chat("hi")).thenReturn("ok");
+
+        service.processInput("hi", "p");
+
+        verify(counters).inc("llm.calls");
+    }
+
+    @Test
+    void processInput_incrementsLlmErrorsCounterOnException() {
+        when(bot.getPlayerPosition("p")).thenReturn(java.util.Optional.empty());
+        when(assistant.chat("bad")).thenThrow(new RuntimeException("timeout"));
+
+        service.processInput("bad", "p");
+
+        verify(counters).inc("llm.errors");
+    }
+
+    @Test
+    void processUrgentObservation_incrementsUrgentCallsCounter() {
+        when(assistant.chat("React to the latest framework observation.")).thenReturn("ok");
+
+        service.processUrgentObservation("creeper spotted");
+
+        verify(counters).inc("llm.urgent.calls");
+    }
+
+    @Test
+    void processUrgentObservation_incrementsUrgentErrorsCounterOnException() {
+        when(assistant.chat("React to the latest framework observation."))
+                .thenThrow(new RuntimeException("LLM error"));
+
+        service.processUrgentObservation("creeper spotted");
+
+        verify(counters).inc("llm.urgent.errors");
     }
 }

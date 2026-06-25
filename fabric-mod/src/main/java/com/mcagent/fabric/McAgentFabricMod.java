@@ -6,6 +6,8 @@ import com.mcagent.core.config.EnvLoader;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.telemetry.Counters;
+import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.fabric.observer.AutonomousObserver;
 import com.mcagent.fabric.queue.BotEventQueue;
 import com.mcagent.fabric.queue.FrameworkMessageBuffer;
@@ -115,16 +117,18 @@ public class McAgentFabricMod implements ClientModInitializer {
             ChatService chatService = springContext.getBean(ChatService.class);
 
             baritoneBridge = (FabricBaritoneBridge) botOps;
+            Counters counters = springContext.getBean(Counters.class);
 
             // Initialize framework message buffer: throttled, deduplicated, batched
             frameworkBuffer = new FrameworkMessageBuffer(
                     32,           // capacity
                     250,          // throttle ms
-                    msg -> langChainService.addFrameworkContext(msg)
+                    msg -> langChainService.addFrameworkContext(msg),
+                    counters
             );
 
             // Initialize event queue (inbound + outbound)
-            botEventQueue = new BotEventQueue(frameworkBuffer);
+            botEventQueue = new BotEventQueue(frameworkBuffer, counters);
 
             // Wire Baritone progress callbacks to the framework buffer
             botOps.setProgressCallback(msg -> {
@@ -139,7 +143,8 @@ public class McAgentFabricMod implements ClientModInitializer {
             BotProperties botProperties = springContext.getBean(BotProperties.class);
             autonomousObserver = new AutonomousObserver(botOps, botEventQueue, botProperties.getObservation());
 
-            chatHandler = new FabricChatHandler(botEventQueue, autonomousObserver);
+            JobTracker jobTracker = springContext.getBean(JobTracker.class);
+            chatHandler = new FabricChatHandler(botEventQueue, autonomousObserver, botOps, jobTracker, counters);
             botEventQueue.start(langChainService);
 
             LOGGER.info("McAgent initialized successfully. Beans: {}",

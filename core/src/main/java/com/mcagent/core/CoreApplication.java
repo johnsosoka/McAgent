@@ -13,6 +13,10 @@ import com.mcagent.core.memory.VectorMemoryService;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.core.service.SafetyValidator;
+import com.mcagent.core.telemetry.Counters;
+import com.mcagent.core.telemetry.JobTracker;
+import com.mcagent.core.telemetry.RunLog;
+import com.mcagent.core.telemetry.Watchdog;
 import com.mcagent.core.tools.MinecraftTools;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -33,6 +37,10 @@ import org.springframework.context.annotation.Import;
         LangChain4jService.class,
         ChatService.class,
         SafetyValidator.class,
+        Counters.class,
+        JobTracker.class,
+        RunLog.class,
+        Watchdog.class,
         MinecraftTools.class,
         LocationMemoryService.class,
         PlayerNoteService.class,

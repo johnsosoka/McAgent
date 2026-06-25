@@ -67,6 +67,7 @@ dependencies {
         exclude group: 'org.slf4j', module: 'slf4j-simple'
     }
     testImplementation 'org.assertj:assertj-core:3.27.0'
+    testImplementation 'ch.qos.logback:logback-classic:1.5.12'
 }
 
 tasks.withType(JavaCompile).configureEach {

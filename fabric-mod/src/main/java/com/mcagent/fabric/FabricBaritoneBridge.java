@@ -41,7 +41,6 @@ import net.minecraft.core.BlockPos;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -59,20 +58,6 @@ import org.slf4j.LoggerFactory;
 public class FabricBaritoneBridge implements BotOperations {
 
     private static final Logger log = LoggerFactory.getLogger(FabricBaritoneBridge.class);
-
-    private static final Map<String, Block> BLOCK_MAP = Map.ofEntries(
-            Map.entry("DIAMOND_ORE", Blocks.DIAMOND_ORE),
-            Map.entry("IRON_ORE", Blocks.IRON_ORE),
-            Map.entry("GOLD_ORE", Blocks.GOLD_ORE),
-            Map.entry("COAL_ORE", Blocks.COAL_ORE),
-            Map.entry("REDSTONE_ORE", Blocks.REDSTONE_ORE),
-            Map.entry("LAPIS_ORE", Blocks.LAPIS_ORE),
-            Map.entry("EMERALD_ORE", Blocks.EMERALD_ORE),
-            Map.entry("STONE", Blocks.STONE),
-            Map.entry("OAK_LOG", Blocks.OAK_LOG),
-            Map.entry("BIRCH_LOG", Blocks.BIRCH_LOG),
-            Map.entry("SPRUCE_LOG", Blocks.SPRUCE_LOG)
-    );
 
     private static final Set<String> HOSTILE_MOBS = Set.of(
             "Creeper", "Zombie", "Skeleton", "Spider", "Enderman", "Witch",
@@ -238,17 +223,17 @@ public class FabricBaritoneBridge implements BotOperations {
     public PathResult mine(String blockType, int maxBlocks, Integer radius) {
         return ClientThreadExecutor.execute(() -> {
             log.info("Baritone: mine({}, {}, {})", blockType, maxBlocks, radius);
-            Block block = resolveBlock(blockType);
-            if (block == null) {
+            Optional<Block> block = resolveBlock(blockType);
+            if (block.isEmpty()) {
                 return PathResult.builder()
                         .success(false)
-                        .message("Unknown block type: " + blockType)
+                        .message("No such block: " + blockType)
                         .type(PathResult.PathResultType.ERROR)
                         .build();
             }
 
             IMineProcess mining = baritone.getMineProcess();
-            BlockOptionalMetaLookup boml = new BlockOptionalMetaLookup(block);
+            BlockOptionalMetaLookup boml = new BlockOptionalMetaLookup(block.get());
             mining.mine(maxBlocks, boml);
             notify("Mining " + blockType + " (up to " + maxBlocks + " blocks)");
 
@@ -491,9 +476,9 @@ public class FabricBaritoneBridge implements BotOperations {
     @Override
     public void addBlockToAvoid(String blockType) {
         ClientThreadExecutor.execute(() -> {
-            Block block = resolveBlock(blockType);
-            if (block != null) {
-                BaritoneAPI.getSettings().blocksToAvoidBreaking.value.add(block);
+            Optional<Block> block = resolveBlock(blockType);
+            if (block.isPresent()) {
+                BaritoneAPI.getSettings().blocksToAvoidBreaking.value.add(block.get());
                 log.info("Added block to avoid-breaking list: {}", blockType);
             } else {
                 log.warn("Could not find block: {}", blockType);
@@ -614,20 +599,20 @@ public class FabricBaritoneBridge implements BotOperations {
         }
     }
 
-    private Block resolveBlock(String blockType) {
-        Block block = BLOCK_MAP.get(blockType.toUpperCase());
-        if (block != null) {
-            return block;
+    private Optional<Block> resolveBlock(String blockType) {
+        if (blockType == null || blockType.isBlank()) {
+            return Optional.empty();
         }
+        String lower = blockType.toLowerCase();
+        final String qualified = lower.contains(":") ? lower : "minecraft:" + lower;
         try {
-            Identifier id = Identifier.tryParse(blockType.toLowerCase());
-            if (id == null) {
-                id = Identifier.fromNamespaceAndPath("minecraft", blockType.toLowerCase());
-            }
-            return BuiltInRegistries.BLOCK.get(id).map(ref -> ref.value()).orElse(null);
+            Identifier id = Identifier.parse(qualified);
+            return BuiltInRegistries.BLOCK.get(id)
+                    .map(ref -> ref.value())
+                    .filter(b -> b != Blocks.AIR || qualified.endsWith(":air"));
         } catch (Exception e) {
             log.warn("Could not resolve block: {}", blockType);
-            return null;
+            return Optional.empty();
         }
     }
 
@@ -721,11 +706,11 @@ public class FabricBaritoneBridge implements BotOperations {
     public PathResult buildPlatform(int x1, int y1, int z1, int x2, int y2, int z2, String blockType) {
         return ClientThreadExecutor.execute(() -> {
             log.info("Baritone: buildPlatform({}, {}, {}, {}, {}, {}, {})", x1, y1, z1, x2, y2, z2, blockType);
-            Block block = resolveBlock(blockType);
-            if (block == null) {
+            Optional<Block> block = resolveBlock(blockType);
+            if (block.isEmpty()) {
                 return PathResult.builder()
                         .success(false)
-                        .message("Unknown block type: " + blockType)
+                        .message("No such block: " + blockType)
                         .type(PathResult.PathResultType.ERROR)
                         .build();
             }
@@ -735,7 +720,7 @@ public class FabricBaritoneBridge implements BotOperations {
             BlockPos origin = new BlockPos(Math.min(x1, x2), Math.min(y1, y2), Math.min(z1, z2));
             BaritoneAPI.getSettings().allowPlace.value = true;
             IBuilderProcess builder = baritone.getBuilderProcess();
-            ISchematic schematic = new FillSchematic(width, height, length, new BlockOptionalMeta(block));
+            ISchematic schematic = new FillSchematic(width, height, length, new BlockOptionalMeta(block.get()));
             builder.build("platform", schematic, origin);
             notify("Building " + blockType + " platform " + width + "x" + height + "x" + length);
             return PathResult.builder()
@@ -750,17 +735,17 @@ public class FabricBaritoneBridge implements BotOperations {
     public PathResult placeBlock(int x, int y, int z, String blockType) {
         return ClientThreadExecutor.execute(() -> {
             log.info("Baritone: placeBlock({}, {}, {}, {})", x, y, z, blockType);
-            Block block = resolveBlock(blockType);
-            if (block == null) {
+            Optional<Block> block = resolveBlock(blockType);
+            if (block.isEmpty()) {
                 return PathResult.builder()
                         .success(false)
-                        .message("Unknown block type: " + blockType)
+                        .message("No such block: " + blockType)
                         .type(PathResult.PathResultType.ERROR)
                         .build();
             }
             BaritoneAPI.getSettings().allowPlace.value = true;
             IBuilderProcess builder = baritone.getBuilderProcess();
-            ISchematic schematic = new FillSchematic(1, 1, 1, new BlockOptionalMeta(block));
+            ISchematic schematic = new FillSchematic(1, 1, 1, new BlockOptionalMeta(block.get()));
             builder.build("place", schematic, new BlockPos(x, y, z));
             notify("Placing " + blockType + " at (" + x + ", " + y + ", " + z + ")");
             return PathResult.builder()

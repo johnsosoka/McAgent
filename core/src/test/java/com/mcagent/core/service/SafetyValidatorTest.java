@@ -11,116 +11,205 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SafetyValidatorTest {
 
+    private static final int BOT_Y = 64;
+    private static final int MAX_DEPTH = 16;
+
     private SafetyValidator validator;
 
     @BeforeEach
     void setUp() {
         BotProperties properties = new BotProperties();
         properties.getSafety().setDangerousBlocks(List.of("TNT", "LAVA"));
+        properties.getSafety().setMaxMiningDepth(MAX_DEPTH);
         validator = new SafetyValidator(properties);
     }
 
-    @Test
-    void shouldApproveSafeMining() {
-        BotAction action = BotAction.builder()
-                .type(BotAction.ActionType.MINE)
-                .target("stone")
-                .build();
-
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
-        assertThat(result.needsConfirmation()).isFalse();
-    }
+    // --- Dangerous block rejection ---
 
     @Test
-    void shouldRequireConfirmationForTnt() {
+    void validate_mineResource_dangerousBlockTnt_rejectsAction() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.MINE)
                 .target("TNT_BLOCK")
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
-        assertThat(result.needsConfirmation()).isTrue();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isFalse();
         assertThat(result.reason()).contains("TNT");
+        assertThat(result.reason()).contains("dangerous in safety config");
     }
 
     @Test
-    void shouldRequireConfirmationForLava() {
+    void validate_mineResource_dangerousBlockLava_rejectsAction() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.MINE)
                 .target("flowing_lava")
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
-        assertThat(result.needsConfirmation()).isTrue();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isFalse();
         assertThat(result.reason()).contains("LAVA");
     }
 
+    // --- Depth limit rejection ---
+
     @Test
-    void shouldApproveNavigate() {
+    void validate_mineResource_targetYBelowMaxDepth_rejectsAction() {
+        int targetY = BOT_Y - MAX_DEPTH - 1; // one below the allowed limit
+        BotAction action = BotAction.builder()
+                .type(BotAction.ActionType.MINE)
+                .target("diamond_ore")
+                .y(targetY)
+                .build();
+
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isFalse();
+        assertThat(result.reason()).contains("Mining depth limit");
+        assertThat(result.reason()).contains(String.valueOf(MAX_DEPTH));
+    }
+
+    @Test
+    void validate_mineResource_targetYAtExactLimit_allowsAction() {
+        int targetY = BOT_Y - MAX_DEPTH; // exactly at the allowed limit
+        BotAction action = BotAction.builder()
+                .type(BotAction.ActionType.MINE)
+                .target("iron_ore")
+                .y(targetY)
+                .build();
+
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
+        assertThat(result.reason()).isNull();
+    }
+
+    // --- Normal mine accepted ---
+
+    @Test
+    void validate_mineResource_safeMine_allowsAction() {
+        BotAction action = BotAction.builder()
+                .type(BotAction.ActionType.MINE)
+                .target("stone")
+                .build();
+
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
+        assertThat(result.reason()).isNull();
+    }
+
+    // --- Non-mine action types always approved ---
+
+    @Test
+    void validate_navigate_alwaysAllowed() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.NAVIGATE)
                 .target("base")
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
-        assertThat(result.needsConfirmation()).isFalse();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
     }
 
     @Test
-    void shouldApproveFollow() {
+    void validate_follow_alwaysAllowed() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.FOLLOW)
                 .target("Alice")
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
-        assertThat(result.needsConfirmation()).isFalse();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
     }
 
     @Test
-    void shouldApproveRememberLocation() {
+    void validate_rememberLocation_alwaysAllowed() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.REMEMBER_LOCATION)
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
     }
 
     @Test
-    void shouldApproveQuery() {
+    void validate_query_alwaysAllowed() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.QUERY)
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
     }
 
     @Test
-    void shouldApproveCancel() {
+    void validate_cancel_alwaysAllowed() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.CANCEL)
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
     }
 
     @Test
-    void shouldApproveDefaultAction() {
+    void validate_build_safeBlock_isAllowed() {
         BotAction action = BotAction.builder()
                 .type(BotAction.ActionType.BUILD)
-                .target("house")
+                .target("minecraft:oak_planks")
                 .build();
 
-        SafetyValidator.ValidationResult result = validator.validate(action);
-        assertThat(result.isApproved()).isTrue();
-        assertThat(result.needsConfirmation()).isFalse();
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
+        assertThat(result.reason()).isNull();
+    }
+
+    @Test
+    void validate_build_tntBlock_rejectsAction() {
+        BotAction action = BotAction.builder()
+                .type(BotAction.ActionType.BUILD)
+                .target("minecraft:tnt")
+                .build();
+
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isFalse();
+        assertThat(result.reason()).contains("TNT");
+        assertThat(result.reason()).contains("dangerous in safety config");
+    }
+
+    @Test
+    void validate_build_lavaBlock_rejectsAction() {
+        BotAction action = BotAction.builder()
+                .type(BotAction.ActionType.BUILD)
+                .target("minecraft:lava")
+                .build();
+
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isFalse();
+        assertThat(result.reason()).contains("LAVA");
+        assertThat(result.reason()).contains("dangerous in safety config");
+    }
+
+    @Test
+    void validate_build_nullTarget_isAllowed() {
+        BotAction action = BotAction.builder()
+                .type(BotAction.ActionType.BUILD)
+                .build();
+
+        SafetyValidator.ValidationResult result = validator.validate(action, BOT_Y);
+
+        assertThat(result.allowed()).isTrue();
+        assertThat(result.reason()).isNull();
     }
 }
