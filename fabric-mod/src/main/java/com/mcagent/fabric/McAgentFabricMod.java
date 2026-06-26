@@ -6,8 +6,12 @@ import com.mcagent.core.config.EnvLoader;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.reflex.SurvivalReflexes;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
+import com.mcagent.core.telemetry.RunLog;
+import com.mcagent.fabric.cache.WorldStateCache;
+import com.mcagent.fabric.cache.WorldStateUpdater;
 import com.mcagent.fabric.observer.AutonomousObserver;
 import com.mcagent.fabric.queue.BotEventQueue;
 import com.mcagent.fabric.queue.FrameworkMessageBuffer;
@@ -31,14 +35,31 @@ public class McAgentFabricMod implements ClientModInitializer {
 
     private static final int DISCONNECT_DEBOUNCE_TICKS = 60; // 3 seconds at 20 TPS
 
+    /** Cache update cadence: every N client ticks (5 ticks = 250 ms at 20 TPS). */
+    private static final int CACHE_UPDATE_INTERVAL_TICKS = 5;
+
+    /**
+     * Fallback scan radius used only if BotProperties cannot be resolved before the first
+     * cache refresh. In practice this is never reached because the cache is populated after
+     * initSpringContext() completes; the value intentionally matches the default threat radius.
+     */
+    private static final int CACHE_SCAN_RADIUS_DEFAULT = 32;
+
     private AnnotationConfigApplicationContext springContext;
     private FabricChatHandler chatHandler;
     private FabricBaritoneBridge baritoneBridge;
     private AutonomousObserver autonomousObserver;
+    private WorldStateCache worldStateCache;
     private ClientPacketListener lastConnection;
     private BotEventQueue botEventQueue;
     private FrameworkMessageBuffer frameworkBuffer;
     private int disconnectTicks;
+    private int cacheTickCounter;
+    /**
+     * Resolved from {@code bot.observation.threat-radius} and {@code passive-radius} after
+     * Spring context starts. Defaults to {@link #CACHE_SCAN_RADIUS_DEFAULT} until then.
+     */
+    private int cacheScanRadius = CACHE_SCAN_RADIUS_DEFAULT;
 
     @Override
     public void onInitializeClient() {
@@ -86,6 +107,21 @@ public class McAgentFabricMod implements ClientModInitializer {
             baritoneBridge.onClientTick();
         }
 
+        // Refresh the world-state cache every CACHE_UPDATE_INTERVAL_TICKS ticks.
+        // We are already on the client thread here, so direct Minecraft reads are safe.
+        if (worldStateCache != null && mc.level != null && mc.player != null) {
+            if (++cacheTickCounter >= CACHE_UPDATE_INTERVAL_TICKS) {
+                cacheTickCounter = 0;
+                try {
+                    WorldStateCache.Snapshot snap = WorldStateUpdater.snapshot(
+                            mc.level, mc.player, cacheScanRadius);
+                    worldStateCache.update(snap);
+                } catch (Exception e) {
+                    LOGGER.warn("WorldStateCache update failed: {}", e.getMessage());
+                }
+            }
+        }
+
         if (autonomousObserver != null) {
             autonomousObserver.onTick();
         }
@@ -118,6 +154,8 @@ public class McAgentFabricMod implements ClientModInitializer {
 
             baritoneBridge = (FabricBaritoneBridge) botOps;
             Counters counters = springContext.getBean(Counters.class);
+            worldStateCache = springContext.getBean(WorldStateCache.class);
+            baritoneBridge.setCache(worldStateCache, counters);
 
             // Initialize framework message buffer: throttled, deduplicated, batched
             frameworkBuffer = new FrameworkMessageBuffer(
@@ -141,9 +179,29 @@ public class McAgentFabricMod implements ClientModInitializer {
             chatService.setSender(botEventQueue::enqueueOutbound);
 
             BotProperties botProperties = springContext.getBean(BotProperties.class);
-            autonomousObserver = new AutonomousObserver(botOps, botEventQueue, botProperties.getObservation());
-
+            // Cache scan radius = the larger of threat and passive radii so we capture
+            // both hostile and passive entities in a single pass each tick.
+            cacheScanRadius = Math.max(
+                    botProperties.getObservation().getThreatRadius(),
+                    botProperties.getObservation().getPassiveRadius());
             JobTracker jobTracker = springContext.getBean(JobTracker.class);
+            RunLog runLog = springContext.getBean(RunLog.class);
+            SurvivalReflexes survivalReflexes = springContext.getBean(SurvivalReflexes.class);
+            autonomousObserver = new AutonomousObserver(
+                    botOps, botEventQueue, botProperties.getObservation(),
+                    jobTracker, counters, runLog, botOps,
+                    () -> {
+                        var mc = net.minecraft.client.Minecraft.getInstance();
+                        var player = (mc != null) ? mc.player : null;
+                        if (player == null) return null;
+                        return new com.mcagent.fabric.observer.AutonomousObserver.PlayerState(
+                                player.isDeadOrDying(),
+                                player.getBlockX(), player.getBlockY(), player.getBlockZ());
+                    },
+                    worldStateCache,
+                    survivalReflexes,
+                    botProperties);
+
             chatHandler = new FabricChatHandler(botEventQueue, autonomousObserver, botOps, jobTracker, counters);
             botEventQueue.start(langChainService);
 
@@ -175,7 +233,10 @@ public class McAgentFabricMod implements ClientModInitializer {
         }
         autonomousObserver = null;
         baritoneBridge = null;
+        worldStateCache = null;
         disconnectTicks = 0;
+        cacheTickCounter = 0;
+        cacheScanRadius = CACHE_SCAN_RADIUS_DEFAULT;
         LOGGER.info("McAgent Spring context shut down.");
     }
 }

@@ -2,6 +2,7 @@ package com.mcagent.fabric;
 
 import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.fabric.cache.WorldStateCache;
 import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -32,5 +33,15 @@ public class FabricModConfig {
     @Bean
     public BotOperations botOperations() {
         return new FabricBaritoneBridge();
+    }
+
+    /**
+     * Thread-safe world-state cache refreshed every 5 client ticks (250 ms).
+     * Dispatcher threads and {@link com.mcagent.fabric.observer.AutonomousObserver}
+     * read from this cache instead of blocking on the Minecraft client thread.
+     */
+    @Bean
+    public WorldStateCache worldStateCache() {
+        return new WorldStateCache();
     }
 }

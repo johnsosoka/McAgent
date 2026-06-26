@@ -16,6 +16,7 @@ import com.mcagent.core.service.SafetyValidator;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
+import com.mcagent.core.reflex.SurvivalReflexes;
 import com.mcagent.core.telemetry.Watchdog;
 import com.mcagent.core.tools.MinecraftTools;
 import org.springframework.context.annotation.Configuration;
@@ -42,6 +43,7 @@ import org.springframework.context.annotation.Import;
         RunLog.class,
         Watchdog.class,
         MinecraftTools.class,
+        SurvivalReflexes.class,
         LocationMemoryService.class,
         PlayerNoteService.class,
         VectorMemoryService.class

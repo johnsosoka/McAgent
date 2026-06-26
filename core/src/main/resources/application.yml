@@ -20,6 +20,12 @@ bot:
       - "TNT"
       - "LAVA"
     max-mining-depth: 16
+  reflex:
+    enabled: true
+    eat-threshold: 8
+    health-critical-pct: 30
+    flee-distance: 16
+    dark-light-threshold: 7
 
 llm:
   primary-provider: fireworks

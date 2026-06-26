@@ -1,9 +1,11 @@
 package com.mcagent.core.telemetry;
 
+import com.mcagent.core.service.BotOperations.Location;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -98,5 +100,47 @@ class JobTrackerTest {
         tracker.updateProgress(null);
 
         assertThat(tracker.getLastProgress()).isBlank();
+    }
+
+    @Test
+    void getLastDeath_returnsEmptyByDefault() {
+        assertThat(tracker.getLastDeath()).isEmpty();
+    }
+
+    @Test
+    void recordDeath_setsLastDeath() {
+        Location location = new Location(10, 64, -20);
+        Instant before = Instant.now();
+
+        tracker.recordDeath(location, null);
+
+        assertThat(tracker.getLastDeath()).isPresent();
+        JobTracker.Death death = tracker.getLastDeath().get();
+        assertThat(death.location()).isEqualTo(location);
+        assertThat(death.occurredAt()).isAfterOrEqualTo(before);
+        assertThat(death.suspendedJobDescription()).isNull();
+    }
+
+    @Test
+    void recordDeath_capturesSuspendedJobDescription() {
+        tracker.setCurrentJob("Mining IRON_ORE", "Alice");
+        JobTracker.Job activeJob = tracker.getCurrentJob().get();
+        Location location = new Location(5, 32, 5);
+
+        tracker.recordDeath(location, activeJob);
+
+        JobTracker.Death death = tracker.getLastDeath().get();
+        assertThat(death.suspendedJobDescription()).isEqualTo("Mining IRON_ORE");
+    }
+
+    @Test
+    void recordDeath_overwritesPreviousDeath() {
+        Location first = new Location(0, 64, 0);
+        Location second = new Location(100, 64, 100);
+
+        tracker.recordDeath(first, null);
+        tracker.recordDeath(second, null);
+
+        assertThat(tracker.getLastDeath().get().location()).isEqualTo(second);
     }
 }

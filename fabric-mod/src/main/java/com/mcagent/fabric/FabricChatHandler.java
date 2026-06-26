@@ -178,7 +178,10 @@ public class FabricChatHandler {
 
     /**
      * Compose a compact status string without any LLM round-trip.
-     * Format: {@code Mode: {mode} | Observer: {on/off} | Job: {desc} ({elapsed}) | Last: {progress}}
+     * Format: {@code Mode: {mode} | Observer: {on/off} | Job: {desc} ({elapsed}) | Last: {progress}[ | Death: (x,y,z)]}
+     *
+     * <p>The {@code Death:} segment is appended only when a death was recorded this session.
+     * The full string is truncated to 250 chars to stay within Minecraft's chat limit.</p>
      */
     private String buildStatusString() {
         String mode = autonomousObserver.getMode();
@@ -194,10 +197,21 @@ public class FabricChatHandler {
         String lastProgress = jobTracker.getLastProgress();
         String lastPart = lastProgress.isBlank() ? "—" : lastProgress;
 
-        return "Mode: " + mode
-                + " | Observer: " + observerState
-                + " | Job: " + jobPart
-                + " | Last: " + lastPart;
+        StringBuilder sb = new StringBuilder();
+        sb.append("Mode: ").append(mode)
+          .append(" | Observer: ").append(observerState)
+          .append(" | Job: ").append(jobPart)
+          .append(" | Last: ").append(lastPart);
+
+        jobTracker.getLastDeath().ifPresent(death -> {
+            sb.append(" | Death: (")
+              .append(death.location().x()).append(',')
+              .append(death.location().y()).append(',')
+              .append(death.location().z()).append(')');
+        });
+
+        String result = sb.toString();
+        return result.length() > 250 ? result.substring(0, 250) : result;
     }
 
     /**

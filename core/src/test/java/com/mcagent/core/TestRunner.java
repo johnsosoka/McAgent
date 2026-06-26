@@ -320,6 +320,21 @@ public class TestRunner {
         }
 
         @Override
+        public int getWorldTime() {
+            return 6000; // noon
+        }
+
+        @Override
+        public boolean isNight() {
+            return false;
+        }
+
+        @Override
+        public int getLightLevel() {
+            return 15;
+        }
+
+        @Override
         public void setPathingBehavior(String mode) {
             log.info("[MOCK] setPathingBehavior({})", mode);
         }
@@ -332,6 +347,17 @@ public class TestRunner {
         @Override
         public void clearAvoidedBlocks() {
             log.info("[MOCK] clearAvoidedBlocks");
+        }
+
+        @Override
+        public boolean eat(String itemId) {
+            log.info("[MOCK] eat({})", itemId);
+            return true;
+        }
+
+        @Override
+        public void placeTorch() {
+            log.info("[MOCK] placeTorch");
         }
 
         @Override
@@ -351,6 +377,12 @@ public class TestRunner {
         @Override
         public String getInventorySummary() {
             return "cobblestone x64, oak_planks x32, bread x16, iron_pickaxe x1";
+        }
+
+        @Override
+        public String pickupNearbyItems(int radius) {
+            log.info("[MOCK] pickupNearbyItems({})", radius);
+            return "Mock: 0 items targeted";
         }
 
         @Override

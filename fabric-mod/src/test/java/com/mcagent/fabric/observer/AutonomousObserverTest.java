@@ -2,8 +2,13 @@ package com.mcagent.fabric.observer;
 
 import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.model.EntityInfo;
+import com.mcagent.core.reflex.ReflexSnapshot;
+import com.mcagent.core.reflex.SurvivalReflexes;
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.core.service.BotOperations.HealthStatus;
 import com.mcagent.core.service.BotOperations.ThreatInfo;
+import com.mcagent.core.service.ops.ObservationOperations;
+import com.mcagent.fabric.cache.WorldStateCache;
 import com.mcagent.fabric.queue.BotEventQueue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,6 +21,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -26,10 +32,13 @@ import static org.mockito.Mockito.when;
 class AutonomousObserverTest {
 
     @Mock
-    private BotOperations botOperations;
+    private ObservationOperations botOperations;
 
     @Mock
     private BotEventQueue eventQueue;
+
+    @Mock
+    private SurvivalReflexes survivalReflexes;
 
     private BotProperties.ObservationProperties config;
     private AutonomousObserver observer;
@@ -199,6 +208,154 @@ class AutonomousObserverTest {
         verify(eventQueue).publishFramework(captor.capture());
         assertThat(captor.getValue()).contains("Zombie");
         assertThat(captor.getValue()).doesNotContain("Skeleton");
+    }
+
+    // -----------------------------------------------------------------------
+    // Reflex layer gating tests
+    // -----------------------------------------------------------------------
+
+    @Test
+    void activeMode_warmCache_tickReflexesIsCalled() {
+        BotProperties botProps = new BotProperties();
+        botProps.getReflex().setEnabled(true);
+
+        // Build a warm (non-EMPTY) cache snapshot.
+        WorldStateCache cache = new WorldStateCache();
+        WorldStateCache.Snapshot warmSnap = new WorldStateCache.Snapshot(
+                new BotOperations.Location(0, 64, 0),
+                new HealthStatus(18f, 20f, 15, 0),
+                List.of(),
+                List.of(),
+                List.of(),
+                "bread x4",
+                6000,
+                false,
+                12
+        );
+        cache.update(warmSnap);
+
+        // Use full constructor with active mode.
+        config.setMode("active");
+        observer = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                new com.mcagent.core.telemetry.Counters(),
+                null,
+                null,
+                () -> null,
+                cache,
+                survivalReflexes,
+                botProps);
+
+        // Cache is warm so scan() reads from it; no bridge calls are needed.
+        when(survivalReflexes.tickReflexes(any(ReflexSnapshot.class)))
+                .thenReturn(SurvivalReflexes.Action.NONE);
+
+        tickToScan();
+
+        verify(survivalReflexes).tickReflexes(any(ReflexSnapshot.class));
+    }
+
+    @Test
+    void passiveMode_warmCache_tickReflexesIsNeverCalled() {
+        BotProperties botProps = new BotProperties();
+        botProps.getReflex().setEnabled(true);
+
+        WorldStateCache cache = new WorldStateCache();
+        WorldStateCache.Snapshot warmSnap = new WorldStateCache.Snapshot(
+                new BotOperations.Location(0, 64, 0),
+                new HealthStatus(18f, 20f, 15, 0),
+                List.of(),
+                List.of(),
+                List.of(),
+                "",
+                6000,
+                false,
+                12
+        );
+        cache.update(warmSnap);
+
+        config.setMode("passive");
+        observer = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                new com.mcagent.core.telemetry.Counters(),
+                null,
+                null,
+                () -> null,
+                cache,
+                survivalReflexes,
+                botProps);
+
+        // Cache is warm; scan finds no threats/opportunities and returns early — no bridge calls.
+        tickToScan();
+
+        verify(survivalReflexes, never()).tickReflexes(any());
+    }
+
+    @Test
+    void activeMode_reflexDisabledInConfig_tickReflexesIsNeverCalled() {
+        BotProperties botProps = new BotProperties();
+        botProps.getReflex().setEnabled(false);   // disabled
+
+        WorldStateCache cache = new WorldStateCache();
+        WorldStateCache.Snapshot warmSnap = new WorldStateCache.Snapshot(
+                new BotOperations.Location(0, 64, 0),
+                new HealthStatus(18f, 20f, 15, 0),
+                List.of(),
+                List.of(),
+                List.of(),
+                "",
+                6000,
+                false,
+                12
+        );
+        cache.update(warmSnap);
+
+        config.setMode("active");
+        observer = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                new com.mcagent.core.telemetry.Counters(),
+                null,
+                null,
+                () -> null,
+                cache,
+                survivalReflexes,
+                botProps);
+
+        // Cache is warm; scan finds no threats/opportunities and returns early — no bridge calls.
+        tickToScan();
+
+        verify(survivalReflexes, never()).tickReflexes(any());
+    }
+
+    @Test
+    void activeMode_coldCache_tickReflexesIsNeverCalled() {
+        // Cache is EMPTY (cold boot) — reflex tick must be skipped.
+        BotProperties botProps = new BotProperties();
+        botProps.getReflex().setEnabled(true);
+
+        WorldStateCache cache = new WorldStateCache();  // snapshot = EMPTY
+
+        config.setMode("active");
+        observer = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                new com.mcagent.core.telemetry.Counters(),
+                null,
+                null,
+                () -> null,
+                cache,
+                survivalReflexes,
+                botProps);
+
+        when(botOperations.getNearbyThreats(anyInt())).thenReturn(List.of());
+        when(botOperations.getNearbyEntities(anyString(), anyInt())).thenReturn(List.of());
+
+        tickToScan();
+
+        verify(survivalReflexes, never()).tickReflexes(any());
     }
 
     private void tickToScan() {

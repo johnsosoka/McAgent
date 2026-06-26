@@ -17,6 +17,7 @@ public class BotProperties {
     private ChatProperties chat = new ChatProperties();
     private SafetyProperties safety = new SafetyProperties();
     private ObservationProperties observation = new ObservationProperties();
+    private ReflexProperties reflex = new ReflexProperties();
 
     @Data
     public static class ChatProperties {
@@ -107,5 +108,41 @@ public class BotProperties {
         private int debounceSeconds = 10;
         private boolean trackPassiveMobs = true;
         private List<String> passiveMobTypes = List.of("Pig", "Cow", "Chicken", "Sheep");
+    }
+
+    /**
+     * Configuration for the deterministic survival reflex layer ({@link com.mcagent.core.reflex.SurvivalReflexes}).
+     *
+     * <p>All thresholds use Minecraft's native scales:
+     * health is 0–20, food level is 0–20, and light level is 0–15.</p>
+     */
+    @Data
+    public static class ReflexProperties {
+
+        /** Master switch. When false, {@code AutonomousObserver} skips the reflex tick entirely. */
+        private boolean enabled = true;
+
+        /**
+         * Food level below which the bot attempts to eat (Rule 2).
+         * Minecraft uses a 0–20 scale; 8 corresponds to one visible hunger bar depleted.
+         */
+        private int eatThreshold = 8;
+
+        /**
+         * HP percentage (0–100) below which the bot enters critical-safety mode (Rule 1).
+         * Compared against {@code health / maxHealth * 100}.
+         */
+        private int healthCriticalPct = 30;
+
+        /**
+         * Distance in blocks the bot should flee from the closest threat (Rule 1).
+         */
+        private int fleeDistance = 16;
+
+        /**
+         * Combined light level below which the bot places a torch at night (Rule 3).
+         * Minecraft's light scale is 0–15; 7 is the typical mob-spawning boundary.
+         */
+        private int darkLightThreshold = 7;
     }
 }

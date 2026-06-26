@@ -477,6 +477,159 @@ class MinecraftToolsTest {
         verify(bot, never()).placeBlock(anyInt(), anyInt(), anyInt(), any());
     }
 
+    // -------------------------------------------------------------------------
+    // Sprint 12 C3 — survival tools
+    // -------------------------------------------------------------------------
+
+    // --- eatFood ---
+
+    @Test
+    void eatFood_withItemId_callsBotEat() {
+        when(bot.eat("minecraft:bread")).thenReturn(true);
+        when(bot.getHealthStatus())
+                .thenReturn(new BotOperations.HealthStatus(20f, 20f, 10, 0))
+                .thenReturn(new BotOperations.HealthStatus(20f, 20f, 15, 0));
+
+        String result = tools.eatFood("minecraft:bread");
+
+        verify(bot).eat("minecraft:bread");
+        assertThat(result).contains("Ate minecraft:bread").contains("15/20");
+    }
+
+    @Test
+    void eatFood_withNull_callsBotEatWithNull() {
+        when(bot.eat(null)).thenReturn(true);
+        when(bot.getHealthStatus())
+                .thenReturn(new BotOperations.HealthStatus(20f, 20f, 8, 0))
+                .thenReturn(new BotOperations.HealthStatus(20f, 20f, 14, 0));
+
+        String result = tools.eatFood(null);
+
+        verify(bot).eat(null);
+        assertThat(result).contains("Ate food").contains("14/20");
+    }
+
+    @Test
+    void eatFood_failsWhenNoFood() {
+        when(bot.eat("minecraft:golden_carrot")).thenReturn(false);
+        when(bot.getHealthStatus()).thenReturn(new BotOperations.HealthStatus(20f, 20f, 20, 0));
+
+        String result = tools.eatFood("minecraft:golden_carrot");
+
+        verify(bot).eat("minecraft:golden_carrot");
+        assertThat(result).contains("Could not eat").contains("minecraft:golden_carrot");
+    }
+
+    // --- placeTorchAtFeet ---
+
+    @Test
+    void placeTorchAtFeet_succeeds() {
+        when(bot.hasItem("minecraft:torch", 1)).thenReturn(true);
+
+        String result = tools.placeTorchAtFeet();
+
+        verify(bot).hasItem("minecraft:torch", 1);
+        verify(bot).placeTorch();
+        assertThat(result).isEqualTo("Torch placed.");
+    }
+
+    @Test
+    void placeTorchAtFeet_failsWhenNoTorch() {
+        when(bot.hasItem("minecraft:torch", 1)).thenReturn(false);
+
+        String result = tools.placeTorchAtFeet();
+
+        verify(bot).hasItem("minecraft:torch", 1);
+        verify(bot, never()).placeTorch();
+        assertThat(result).isEqualTo("No torch in inventory.");
+    }
+
+    // --- getWorldTime ---
+
+    @Test
+    void getWorldTime_returnsTimeString_duringDay() {
+        when(bot.getWorldTime()).thenReturn(6000);
+        when(bot.isNight()).thenReturn(false);
+
+        String result = tools.getWorldTime();
+
+        assertThat(result).isEqualTo("World time: 6000 (day).");
+    }
+
+    @Test
+    void getWorldTime_returnsTimeString_duringNight() {
+        when(bot.getWorldTime()).thenReturn(18000);
+        when(bot.isNight()).thenReturn(true);
+
+        String result = tools.getWorldTime();
+
+        assertThat(result).isEqualTo("World time: 18000 (night).");
+    }
+
+    // --- isNight ---
+
+    @Test
+    void isNight_returnsTrueString_whenNight() {
+        when(bot.isNight()).thenReturn(true);
+        when(bot.getWorldTime()).thenReturn(18000);
+
+        String result = tools.isNight();
+
+        assertThat(result).contains("Yes").contains("night").contains("18000");
+    }
+
+    @Test
+    void isNight_returnsFalseString_whenDay() {
+        when(bot.isNight()).thenReturn(false);
+        when(bot.getWorldTime()).thenReturn(6000);
+
+        String result = tools.isNight();
+
+        assertThat(result).contains("No").contains("daytime").contains("6000");
+    }
+
+    // --- getLightLevel ---
+
+    @Test
+    void getLightLevel_returnsInt_withSafeLabel() {
+        when(bot.getLightLevel()).thenReturn(12);
+
+        String result = tools.getLightLevel();
+
+        assertThat(result).isEqualTo("Light level: 12 (safe).");
+    }
+
+    @Test
+    void getLightLevel_returnsInt_withSpawnRiskLabel() {
+        when(bot.getLightLevel()).thenReturn(3);
+
+        String result = tools.getLightLevel();
+
+        assertThat(result).contains("3").contains("mob spawning possible");
+    }
+
+    // --- pickupNearbyItems ---
+
+    @Test
+    void pickupNearbyItems_returnsCountString() {
+        when(bot.pickupNearbyItems(16)).thenReturn("Targeting 4 item(s) within 16 blocks.");
+
+        String result = tools.pickupNearbyItems(16);
+
+        verify(bot).pickupNearbyItems(16);
+        assertThat(result).contains("4").contains("16");
+    }
+
+    @Test
+    void pickupNearbyItems_returnsNoItemsMessage_whenEmpty() {
+        when(bot.pickupNearbyItems(8)).thenReturn("No items found within 8 blocks.");
+
+        String result = tools.pickupNearbyItems(8);
+
+        verify(bot).pickupNearbyItems(8);
+        assertThat(result).contains("No items");
+    }
+
     // --- cancelCurrentOperation ---
 
     @Test

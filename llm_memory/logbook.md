@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-06-25 — Session: Sprint 12 — Bot Stays Alive
+
+**Branch:** `feature/sprint-12-survival` (off Sprint 11)
+**Tests:** 262 total, 0 failures (+90 from Sprint 11)
+
+### What we shipped
+
+- **C2 — Interface split.** `BotOperations` → 5 role interfaces under `core/.../service/ops/`. `AutonomousObserver` narrowed to `ObservationOperations`. Composite marker preserved for compatibility.
+- **C3 — Survival tools.** `eat`, `placeTorch`, `getWorldTime`, `isNight`, `getLightLevel`, `pickupNearbyItems` added across the right ops interfaces. 6 new `@Tool` methods. Pure-Java helpers in `BotControlHelpers`.
+- **C5 — Death/respawn handler.** `DeathDetector` state machine. `JobTracker.recordDeath`. Framework messages on death/respawn. No auto-resume. `agent status` now shows last death.
+- **Q7 — Read-only state cache.** `WorldStateCache` + `WorldStateUpdater` refresh every 5 ticks on client thread. 9 read methods cached. `cache.hit` / `cache.miss` counters.
+- **C4 — Reflex layer skeleton.** `SurvivalReflexes` with 3 prioritized rules (HP-critical + threats → flee; HP-critical no threats → safety + framework alert; hunger low → eat; night dark with torch → torch). Silent actions, `reflex.*` counters, gated on `active` mode + cache warm.
+- **Cross-cutting fixes** during the cross-bundle race: MC 26.1.2 API mismatches caught (getDayTime → getDefaultClockTime, ServerboundUseItemPacket arity, setSelectedSlot).
+
+### Notable code review findings (all fixed)
+
+- `eat()` always returned false (server tick latency). Fixed: optimistic-true contract on initiation.
+- `Snapshot` list fields were mutable → defensive `List.copyOf()`.
+- `pickupNearbyItems` overwrote goals → single `GoalComposite`.
+- `HOSTILE_MOBS` duplicated between bridge and updater → extracted `HostileMobs.NAMES`.
+- Reflex Rule 1 missed non-threat critical HP (drowning, fall, burn) → new `Action.CRITICAL_NO_THREAT` path with framework alert.
+
+### Deferred to later sprints
+
+- Async eat confirmation (Sprint 13 post-condition system).
+- Formal BT library (Sprint 14 C4 refactor).
+- Crafting / smelting / chest tools (Sprint 13 C3 remainder).
+
+### Next
+
+Hand `e2e-validation/sprint-12-validation.md` to John. Begin Sprint 13 (Plan Layer) on parallel branch.
+
+---
+
 ## 2026-06-25 — Session: Strategic Review & Sprint 11 Foundation
 
 **Branch:** `feature/sprint-11-foundation` (off `feature/issue-10-background-observation-loop`)

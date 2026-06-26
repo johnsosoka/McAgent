@@ -535,6 +535,74 @@ public class MinecraftTools {
     }
 
     // -------------------------------------------------------------------------
+    // Survival / economy tools (Sprint 12 C3)
+    // -------------------------------------------------------------------------
+
+    @Tool("Eat food from the bot's inventory. Pass an itemId like 'minecraft:bread' or pass null to pick the best available food. Returns a status message.")
+    public String eatFood(@P("Minecraft item id, or null for auto-best") String itemId) {
+        log.info("Tool: eatFood({})", itemId);
+        return withToolScope("eatFood", () -> {
+            var health = bot.getHealthStatus();
+            boolean ate = bot.eat(itemId);
+            if (!ate) {
+                String missing = (itemId == null) ? "any food" : itemId;
+                return "Could not eat — no " + missing + " in inventory or hunger is already full.";
+            }
+            var healthAfter = bot.getHealthStatus();
+            String label = (itemId == null) ? "food" : itemId;
+            return "Ate " + label + ". Food: " + healthAfter.foodLevel() + "/20.";
+        });
+    }
+
+    @Tool("Place a torch at the bot's current location if there is a suitable adjacent surface and a torch is in inventory.")
+    public String placeTorchAtFeet() {
+        log.info("Tool: placeTorchAtFeet");
+        return withToolScope("placeTorchAtFeet", () -> {
+            if (!bot.hasItem("minecraft:torch", 1)) {
+                return "No torch in inventory.";
+            }
+            bot.placeTorch();
+            return "Torch placed.";
+        });
+    }
+
+    @Tool("Get the current world time in ticks (0-23999). 0=dawn, 6000=noon, 12000=dusk, 18000=midnight.")
+    public String getWorldTime() {
+        log.info("Tool: getWorldTime");
+        return withToolScope("getWorldTime", () -> {
+            int time = bot.getWorldTime();
+            String period = bot.isNight() ? "night" : "day";
+            return "World time: " + time + " (" + period + ").";
+        });
+    }
+
+    @Tool("Is it currently night-time in the world?")
+    public String isNight() {
+        log.info("Tool: isNight");
+        return withToolScope("isNight", () -> {
+            boolean night = bot.isNight();
+            int time = bot.getWorldTime();
+            return night ? "Yes, it is night (time: " + time + ")." : "No, it is daytime (time: " + time + ").";
+        });
+    }
+
+    @Tool("Get the light level at the bot's current position (0-15). Low values mean mob spawning is possible.")
+    public String getLightLevel() {
+        log.info("Tool: getLightLevel");
+        return withToolScope("getLightLevel", () -> {
+            int light = bot.getLightLevel();
+            String risk = (light < 8) ? " (mob spawning possible)" : " (safe)";
+            return "Light level: " + light + risk + ".";
+        });
+    }
+
+    @Tool("Walk over and pick up any item entities within the given radius.")
+    public String pickupNearbyItems(@P("Radius in blocks") int radius) {
+        log.info("Tool: pickupNearbyItems({})", radius);
+        return withToolScope("pickupNearbyItems", () -> bot.pickupNearbyItems(radius));
+    }
+
+    // -------------------------------------------------------------------------
     // Instrumentation helper
     // -------------------------------------------------------------------------
 

@@ -10,7 +10,6 @@ import baritone.api.event.listener.AbstractGameEventListener;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalComposite;
-import baritone.api.pathing.goals.GoalInverted;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.pathing.goals.GoalXZ;
 import baritone.api.pathing.goals.GoalYLevel;
@@ -27,22 +26,33 @@ import com.mcagent.core.model.PathResult;
 import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.BotOperations.Location;
+import com.mcagent.core.service.ops.BotControlOperations;
+import com.mcagent.core.service.ops.BuildingOperations;
+import com.mcagent.core.service.ops.InventoryOperations;
+import com.mcagent.core.service.ops.NavigationOperations;
+import com.mcagent.core.service.ops.ObservationOperations;
+import com.mcagent.core.telemetry.Counters;
+import com.mcagent.fabric.cache.WorldStateCache;
 import com.mcagent.fabric.queue.ClientThreadExecutor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -55,15 +65,16 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Compatible with Baritone v1.15.0+ API (Mojmap for MC 26.1.2).</p>
  */
-public class FabricBaritoneBridge implements BotOperations {
+public class FabricBaritoneBridge implements BotOperations,
+        NavigationOperations,
+        ObservationOperations,
+        InventoryOperations,
+        BuildingOperations,
+        BotControlOperations {
 
     private static final Logger log = LoggerFactory.getLogger(FabricBaritoneBridge.class);
 
-    private static final Set<String> HOSTILE_MOBS = Set.of(
-            "Creeper", "Zombie", "Skeleton", "Spider", "Enderman", "Witch",
-            "Drowned", "Husk", "Stray", "WitherSkeleton", "Blaze", "Ghast",
-            "PiglinBrute", "Vindicator", "Evoker", "Ravager"
-    );
+    // Hostile mob names are defined centrally in HostileMobs to avoid duplication with WorldStateUpdater.
 
     private final IBaritone baritone;
     private Consumer<String> progressCallback;
@@ -73,6 +84,13 @@ public class FabricBaritoneBridge implements BotOperations {
     private boolean wasMining;
     private boolean wasFollowing;
     private int pathStuckTicks;
+
+    // Read-only world state cache; injected after Spring context is assembled.
+    // Null until setCache() is called — fallback to live ClientThreadExecutor reads.
+    private volatile WorldStateCache worldStateCache;
+
+    // Counters for cache telemetry; injected alongside the cache.
+    private volatile Counters counters;
 
     public FabricBaritoneBridge() {
         this.baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
@@ -91,6 +109,16 @@ public class FabricBaritoneBridge implements BotOperations {
                 }
             }
         });
+    }
+
+    /**
+     * Inject the world-state cache and counters after the Spring context has
+     * assembled both beans. Called from {@link com.mcagent.fabric.McAgentFabricMod}.
+     * Thread-safe: both fields are {@code volatile}.
+     */
+    public void setCache(WorldStateCache cache, Counters counters) {
+        this.worldStateCache = cache;
+        this.counters = counters;
     }
 
     @Override
@@ -268,6 +296,15 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public Location getCurrentPosition() {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.currentPosition();
+            }
+        }
+        recordCacheMiss();
         return ClientThreadExecutor.execute(() -> {
             var pos = baritone.getPlayerContext().playerFeet();
             return new Location(pos.x, pos.y, pos.z);
@@ -319,6 +356,15 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public List<PlayerInfo> getNearbyPlayers(int radius) {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.playersWithinRadius(radius);
+            }
+        }
+        recordCacheMiss();
         return ClientThreadExecutor.execute(() -> {
             var mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) {
@@ -348,6 +394,15 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public List<EntityInfo> getNearbyEntities(String entityType, int radius) {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.entitiesWithinRadius(entityType, radius);
+            }
+        }
+        recordCacheMiss();
         return ClientThreadExecutor.execute(() -> {
             var mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) {
@@ -402,6 +457,15 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public HealthStatus getHealthStatus() {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.health();
+            }
+        }
+        recordCacheMiss();
         return ClientThreadExecutor.execute(() -> {
             var player = Minecraft.getInstance().player;
             if (player == null) {
@@ -418,6 +482,15 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public List<ThreatInfo> getNearbyThreats(int radius) {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.threatsWithinRadius(radius);
+            }
+        }
+        recordCacheMiss();
         return ClientThreadExecutor.execute(() -> {
             var mc = Minecraft.getInstance();
             if (mc.level == null || mc.player == null) {
@@ -438,6 +511,63 @@ public class FabricBaritoneBridge implements BotOperations {
             }
             threats.sort((a, b) -> Double.compare(a.distance(), b.distance()));
             return threats;
+        });
+    }
+
+    @Override
+    public int getWorldTime() {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.worldTime();
+            }
+        }
+        recordCacheMiss();
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null) {
+                log.warn("Cannot get world time: level is null");
+                return 0;
+            }
+            return (int) (mc.level.getDefaultClockTime() % 24000);
+        });
+    }
+
+    @Override
+    public boolean isNight() {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.isNight();
+            }
+        }
+        recordCacheMiss();
+        return BotControlHelpers.isNightTick(getWorldTime());
+    }
+
+    @Override
+    public int getLightLevel() {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.lightLevel();
+            }
+        }
+        recordCacheMiss();
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null || mc.player == null) {
+                log.warn("Cannot get light level: level or player is null");
+                return 0;
+            }
+            BlockPos feetPos = mc.player.blockPosition();
+            return mc.level.getMaxLocalRawBrightness(feetPos);
         });
     }
 
@@ -494,8 +624,174 @@ public class FabricBaritoneBridge implements BotOperations {
         });
     }
 
+    /**
+     * Attempt to eat a food item from the bot's inventory.
+     *
+     * <p><b>Contract: optimistic / best-effort.</b> Food consumption is server-authoritative
+     * and takes approximately 32 ticks to complete. The post-call food level on the same
+     * tick will not yet reflect the eaten item, so a synchronous hunger check always
+     * returns false. Instead, this method returns {@code true} as soon as a valid food
+     * slot has been selected and {@code useItem} dispatched — meaning "eat initiated
+     * successfully." A {@code false} return means no suitable food was found in inventory.</p>
+     *
+     * <p>Sprint 13 may add an async follow-up verification via
+     * {@code Minecraft.getInstance().execute(...)} scheduled 40 ticks out, if tighter
+     * confirmation semantics are needed.</p>
+     *
+     * @param itemId specific food item ID, or {@code null} for auto-best selection
+     * @return {@code true} if a food item was found and consumption initiated;
+     *         {@code false} if no matching food was in inventory
+     */
+    @Override
+    public boolean eat(String itemId) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.player == null) {
+                log.warn("Cannot eat: player is null");
+                return false;
+            }
+
+            // Build a slot list from inventory for the helper
+            var inv = mc.player.getInventory();
+            List<BotControlHelpers.InventorySlot> slots = new ArrayList<>();
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                ItemStack stack = inv.getItem(i);
+                if (!stack.isEmpty()) {
+                    String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    slots.add(new BotControlHelpers.InventorySlot(i, id, stack.getCount()));
+                }
+            }
+
+            int targetSlot = (itemId == null)
+                    ? BotControlHelpers.chooseBestFoodSlot(slots, BotControlHelpers.FOOD_PRIORITY)
+                    : BotControlHelpers.findItemSlot(slots, itemId);
+
+            if (targetSlot < 0) {
+                log.info("eat: no food found (itemId={})", itemId);
+                return false;
+            }
+
+            // Move the food item into a hotbar slot (0-8) so it can be selected.
+            // Inventory slots 0-8 are hotbar slots; slots >= 9 are main inventory.
+            if (targetSlot >= 9) {
+                // Swap the item into the currently selected hotbar slot
+                inv.pickSlot(targetSlot);
+                // After pickSlot the item is now at inv.getSelectedSlot()
+            } else {
+                inv.setSelectedSlot(targetSlot);
+            }
+
+            // Dispatch the use-item packet to begin food consumption animation.
+            // Food consumption is server-authoritative (~32 ticks); we do not wait
+            // for the server acknowledgement — return optimistic true immediately.
+            if (mc.gameMode != null) {
+                mc.gameMode.useItem(mc.player, InteractionHand.MAIN_HAND);
+            }
+
+            log.info("eat: initiated consumption of slot {} (itemId={})", targetSlot, itemId);
+            return true;
+        });
+    }
+
+    @Override
+    public void placeTorch() {
+        ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.player == null || mc.level == null || mc.gameMode == null) {
+                log.warn("placeTorch: not in a world");
+                return;
+            }
+
+            // Confirm torch in inventory
+            if (!hasItem("minecraft:torch", 1)) {
+                log.info("placeTorch: no torch in inventory");
+                return;
+            }
+
+            // Select a torch in hotbar or swap it in
+            var inv = mc.player.getInventory();
+            List<BotControlHelpers.InventorySlot> slots = new ArrayList<>();
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                ItemStack stack = inv.getItem(i);
+                if (!stack.isEmpty()) {
+                    String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                    slots.add(new BotControlHelpers.InventorySlot(i, id, stack.getCount()));
+                }
+            }
+            int torchSlot = BotControlHelpers.findItemSlot(slots, "minecraft:torch");
+            if (torchSlot < 0) {
+                return; // already checked hasItem, should not happen
+            }
+            if (torchSlot >= 9) {
+                inv.pickSlot(torchSlot);
+            } else {
+                inv.setSelectedSlot(torchSlot);
+            }
+
+            // Find a placement surface: scan adjacent blocks at bot's feet level.
+            // Torches attach to the side of a solid block; we want an air block with
+            // a solid block adjacent in a horizontal direction.
+            BlockPos feetPos = mc.player.blockPosition();
+            Direction[] horizontalDirs = {
+                    Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST
+            };
+
+            BlockPos placementPos = null;
+            Direction attachFace = null;
+
+            for (Direction dir : horizontalDirs) {
+                BlockPos candidate = feetPos.relative(dir);
+                BlockPos supportBlock = candidate.relative(dir); // block to attach torch against
+                if (mc.level.getBlockState(candidate).isAir()
+                        && mc.level.getBlockState(supportBlock).isSolid()) {
+                    placementPos = candidate;
+                    attachFace = dir.getOpposite();
+                    break;
+                }
+            }
+
+            // Fallback: place on the block directly below the bot's feet
+            if (placementPos == null) {
+                BlockPos below = feetPos.below();
+                if (mc.level.getBlockState(feetPos).isAir()
+                        && mc.level.getBlockState(below).isSolid()) {
+                    placementPos = feetPos;
+                    attachFace = Direction.DOWN;
+                }
+            }
+
+            if (placementPos == null) {
+                log.info("placeTorch: no suitable adjacent surface found at {}", feetPos);
+                return;
+            }
+
+            // Use the game mode's useItemOn to place the torch
+            BlockPos supportingBlock = placementPos.relative(attachFace.getOpposite());
+            Vec3 hitVec = Vec3.atCenterOf(supportingBlock);
+            BlockHitResult hit = new BlockHitResult(hitVec, attachFace, supportingBlock, false);
+            mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hit);
+            log.info("placeTorch: placed at {} (attached to {} face)", placementPos, attachFace);
+        });
+    }
+
+    /** Increment the {@code cache.hit} counter when the cache served a read. */
+    private void recordCacheHit() {
+        Counters c = counters;
+        if (c != null) {
+            c.inc("cache.hit");
+        }
+    }
+
+    /** Increment the {@code cache.miss} counter when the cache fell back to a live read. */
+    private void recordCacheMiss() {
+        Counters c = counters;
+        if (c != null) {
+            c.inc("cache.miss");
+        }
+    }
+
     private boolean isHostileMob(String type) {
-        return HOSTILE_MOBS.contains(type);
+        return HostileMobs.NAMES.contains(type);
     }
 
     private void populateCommonAvoidBlocks() {
@@ -669,6 +965,15 @@ public class FabricBaritoneBridge implements BotOperations {
 
     @Override
     public String getInventorySummary() {
+        WorldStateCache cache = worldStateCache;
+        if (cache != null) {
+            WorldStateCache.Snapshot snap = cache.get();
+            if (!snap.isEmpty()) {
+                recordCacheHit();
+                return snap.inventorySummary();
+            }
+        }
+        recordCacheMiss();
         return ClientThreadExecutor.execute(() -> {
             var player = Minecraft.getInstance().player;
             if (player == null) {
@@ -699,6 +1004,35 @@ public class FabricBaritoneBridge implements BotOperations {
                 sb.append(entry.getKey()).append(" x").append(entry.getValue());
             }
             return sb.toString();
+        });
+    }
+
+    @Override
+    public String pickupNearbyItems(int radius) {
+        return ClientThreadExecutor.execute(() -> {
+            var mc = Minecraft.getInstance();
+            if (mc.level == null || mc.player == null) {
+                log.warn("Cannot pickup items: level or player is null");
+                return "Cannot pick up items: not in a world.";
+            }
+            BlockPos botPos = mc.player.blockPosition();
+            double r = radius;
+            AABB searchBox = AABB.ofSize(
+                    new Vec3(botPos.getX(), botPos.getY(), botPos.getZ()),
+                    r * 2, r * 2, r * 2
+            );
+            List<ItemEntity> items = mc.level.getEntitiesOfClass(ItemEntity.class, searchBox);
+            if (items.isEmpty()) {
+                return "No items found within " + radius + " blocks.";
+            }
+            // Build a single GoalComposite so Baritone navigates to the nearest of all items
+            // in one pathing call. Setting the goal in a loop overwrites the previous goal on
+            // each iteration, meaning only the last item would ever be pathed to.
+            Goal[] goals = items.stream()
+                    .map(i -> (Goal) new GoalNear(i.blockPosition(), 1))
+                    .toArray(Goal[]::new);
+            baritone.getCustomGoalProcess().setGoalAndPath(new GoalComposite(goals));
+            return "Picking up " + items.size() + " items within " + radius + " blocks.";
         });
     }
 
