@@ -43,6 +43,8 @@ public class JobTracker {
     private volatile Job currentJob;
     private volatile String lastProgress = "";
     private volatile Death lastDeath;
+    private volatile Instant lastPlayerInteraction = Instant.EPOCH;
+    private volatile Instant lastHeartbeatSent = Instant.EPOCH;
 
     /**
      * Record a new active job, replacing any previous one.
@@ -127,5 +129,44 @@ public class JobTracker {
      */
     public Optional<Death> getLastDeath() {
         return Optional.ofNullable(lastDeath);
+    }
+
+    /**
+     * Record that the player just sent a message to the bot. Used by the heartbeat
+     * suppression logic — if the player is actively chatting, heartbeats are silent.
+     */
+    public void markPlayerInteraction() {
+        this.lastPlayerInteraction = Instant.now();
+    }
+
+    /**
+     * Determine whether a heartbeat should be sent right now.
+     *
+     * <p>Returns {@code false} when either:
+     * <ul>
+     *   <li>a heartbeat was already sent within {@code cooldown}, or</li>
+     *   <li>the player interacted with the bot within {@code suppressIfRecentChat}.</li>
+     * </ul>
+     *
+     * @param cooldown              minimum time between heartbeats
+     * @param suppressIfRecentChat  suppress heartbeats when player chatted within this window
+     * @return {@code true} if a heartbeat should be emitted now
+     */
+    public boolean shouldSendHeartbeat(Duration cooldown, Duration suppressIfRecentChat) {
+        Instant now = Instant.now();
+        if (Duration.between(lastHeartbeatSent, now).compareTo(cooldown) < 0) {
+            return false;
+        }
+        if (Duration.between(lastPlayerInteraction, now).compareTo(suppressIfRecentChat) < 0) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Record that a heartbeat was just emitted. Resets the heartbeat cooldown timer.
+     */
+    public void markHeartbeatSent() {
+        this.lastHeartbeatSent = Instant.now();
     }
 }

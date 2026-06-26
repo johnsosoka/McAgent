@@ -4,10 +4,15 @@ import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.reflex.ReflexSnapshot;
 import com.mcagent.core.reflex.SurvivalReflexes;
+import com.mcagent.core.service.BotOperations.HealthStatus;
 import com.mcagent.core.service.BotOperations.Location;
 import com.mcagent.core.service.BotOperations.ThreatInfo;
 import com.mcagent.core.service.ops.BotControlOperations;
+import com.mcagent.core.service.ops.InventoryOperations;
 import com.mcagent.core.service.ops.ObservationOperations;
+import com.mcagent.core.task.TaskExecutor;
+import com.mcagent.core.task.TaskSnapshot;
+import com.mcagent.core.task.TaskState;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
@@ -16,9 +21,12 @@ import com.mcagent.fabric.queue.BotEventQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
@@ -50,6 +58,10 @@ public class AutonomousObserver {
     // Nullable: when present, tickReflexes is called in active mode before scan reporting.
     private final SurvivalReflexes survivalReflexes;
     private final BotProperties botProps;
+    // Nullable: when present, threat observations are suppressed during low-risk task execution.
+    private final TaskExecutor taskExecutor;
+    // Nullable: when present, heartbeat messages include inventory summary.
+    private final InventoryOperations inventoryOps;
 
     private int tickCounter;
     private volatile boolean enabled;
@@ -68,6 +80,12 @@ public class AutonomousObserver {
      * @param botProps            full bot properties, used to gate reflexes by
      *                            {@code reflex.enabled}; may be {@code null} when
      *                            {@code survivalReflexes} is also null.
+     * @param taskExecutor        task executor used to detect active Plans; may be
+     *                            {@code null} in lightweight test wiring that does not
+     *                            exercise task-aware suppression.
+     * @param inventoryOps        inventory operations used to retrieve the inventory summary
+     *                            for heartbeat messages; may be {@code null} in lightweight
+     *                            test wiring (heartbeat will omit inventory info).
      */
     public AutonomousObserver(ObservationOperations botOperations,
                               BotEventQueue eventQueue,
@@ -79,7 +97,9 @@ public class AutonomousObserver {
                               Supplier<PlayerState> playerStateSupplier,
                               WorldStateCache worldStateCache,
                               SurvivalReflexes survivalReflexes,
-                              BotProperties botProps) {
+                              BotProperties botProps,
+                              TaskExecutor taskExecutor,
+                              InventoryOperations inventoryOps) {
         if (botOperations == null) {
             throw new IllegalArgumentException("botOperations must not be null");
         }
@@ -109,6 +129,8 @@ public class AutonomousObserver {
         this.worldStateCache = worldStateCache;
         this.survivalReflexes = survivalReflexes;
         this.botProps = botProps;
+        this.taskExecutor = taskExecutor;
+        this.inventoryOps = inventoryOps;
         this.debounceMap = new ConcurrentHashMap<>();
         this.deathDetector = new DeathDetector();
         this.enabled = config.isEnabled();
@@ -132,7 +154,9 @@ public class AutonomousObserver {
                 () -> null,   // no Minecraft classes loaded in test context
                 null,         // no cache in lightweight test wiring
                 null,         // no reflexes in lightweight test wiring
-                null);        // no botProps in lightweight test wiring
+                null,         // no botProps in lightweight test wiring
+                null,         // no taskExecutor in lightweight test wiring
+                null);        // no inventoryOps in lightweight test wiring
     }
 
     public void onTick() {
@@ -280,12 +304,15 @@ public class AutonomousObserver {
             }
         }
 
+        maybeEmitHeartbeat();
+
         cleanExpiredDebounces();
 
         var threats = threatsFromCacheOrBridge();
         var opportunities = collectOpportunities();
 
         var newThreats = filterDebouncedThreats(threats);
+        newThreats = suppressLowRiskThreats(newThreats);
         var newOpportunities = filterDebouncedEntities(opportunities);
 
         if (newThreats.isEmpty() && newOpportunities.isEmpty()) {
@@ -341,6 +368,153 @@ public class AutonomousObserver {
             }
         }
         return botOperations.getNearbyEntities(entityType, radius);
+    }
+
+    /**
+     * Suppress threats that are outside the low-risk suppression radius when a low-risk
+     * task is currently RUNNING. Opportunities are never suppressed by this method.
+     *
+     * <p>Only threats beyond {@code config.getLowRiskThreatRadius()} are suppressed.
+     * Threats within the radius are always published so the bot can react to immediate danger.</p>
+     *
+     * <p>TODO Sprint 14: when {@code riskLevel == HIGH} (combat-tagged plans), skip suppression
+     * entirely and publish all threats regardless of distance.</p>
+     *
+     * @param threats debounce-filtered threat list
+     * @return threats that should be published after task-aware suppression
+     */
+    private List<ThreatInfo> suppressLowRiskThreats(List<ThreatInfo> threats) {
+        if (taskExecutor == null || threats.isEmpty()) {
+            return threats;
+        }
+
+        Optional<TaskSnapshot> currentTask = taskExecutor.currentTask();
+        boolean lowRiskActive = currentTask.isPresent()
+                && currentTask.get().state() == TaskState.RUNNING;
+
+        if (!lowRiskActive) {
+            return threats;
+        }
+
+        int suppressionRadius = config.getLowRiskThreatRadius();
+        var result = new ArrayList<ThreatInfo>();
+        for (ThreatInfo threat : threats) {
+            if (threat.distance() <= suppressionRadius) {
+                result.add(threat);
+            } else {
+                counters.inc("observation.suppressed");
+                if (runLog != null) {
+                    runLog.log("observation_suppressed", Map.of(
+                            "reason", "task_low_risk",
+                            "distance", (int) threat.distance(),
+                            "type", threat.type()));
+                }
+                log.debug("Suppressed threat {} at distance {} (low-risk task active, radius {})",
+                        threat.type(), (int) threat.distance(), suppressionRadius);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Emit a heartbeat outbound message when all conditions are met:
+     * <ol>
+     *   <li>A Plan is in RUNNING state.</li>
+     *   <li>The plan has been running longer than {@code heartbeatGraceSeconds}.</li>
+     *   <li>The per-heartbeat cooldown has elapsed.</li>
+     *   <li>The player has not chatted within {@code suppressIfRecentChatSeconds}.</li>
+     * </ol>
+     *
+     * <p>Requires {@code botProps} to be non-null (set in full-constructor wiring). If
+     * {@code botProps} or {@code taskExecutor} is absent (lightweight test wiring), the
+     * method is a no-op.</p>
+     */
+    private void maybeEmitHeartbeat() {
+        if (botProps == null || taskExecutor == null) {
+            return;
+        }
+
+        Optional<TaskSnapshot> currentTask = taskExecutor.currentTask();
+        if (currentTask.isEmpty() || currentTask.get().state() != TaskState.RUNNING) {
+            return;
+        }
+
+        TaskSnapshot snap = currentTask.get();
+        Duration elapsed = Duration.between(snap.startedAt(), Instant.now());
+        BotProperties.JobProperties jobProps = botProps.getJob();
+        if (elapsed.toSeconds() < jobProps.getHeartbeatGraceSeconds()) {
+            return;
+        }
+
+        Duration cooldown = Duration.ofSeconds(jobProps.getHeartbeatCooldownSeconds());
+        Duration suppressWindow = Duration.ofSeconds(jobProps.getSuppressIfRecentChatSeconds());
+        if (!jobTracker.shouldSendHeartbeat(cooldown, suppressWindow)) {
+            return;
+        }
+
+        String heartbeat = formatHeartbeat(snap);
+        eventQueue.enqueueOutbound(heartbeat);
+        jobTracker.markHeartbeatSent();
+        counters.inc("heartbeat.sent");
+        if (runLog != null) {
+            runLog.log("heartbeat", Map.of(
+                    "task_id", snap.id().toString(),
+                    "summary", snap.plan().summary()));
+        }
+        log.debug("Heartbeat emitted for task {}: {}", snap.id(), heartbeat);
+    }
+
+    /**
+     * Format a terse heartbeat string for the given task snapshot.
+     *
+     * <p>Pulls inventory summary and health from the live bridge when available.
+     * Format: {@code <step> | <progress> | Y=<y> | <inv> | HP <hp>/<maxHp>}</p>
+     *
+     * <p>The output is truncated to 250 chars (Minecraft chat limit).</p>
+     */
+    private String formatHeartbeat(TaskSnapshot snap) {
+        String stepDesc = snap.plan().steps().isEmpty()
+                ? snap.plan().summary()
+                : snap.plan().steps().get(snap.currentStepIndex()).description();
+        String progress = snap.stepProgress().isBlank() ? "in progress" : snap.stepProgress();
+
+        Location pos = null;
+        HealthStatus health = null;
+        String invSummary = null;
+        try {
+            pos = botOperations.getCurrentPosition();
+            health = botOperations.getHealthStatus();
+            if (inventoryOps != null) {
+                invSummary = inventoryOps.getInventorySummary();
+            }
+        } catch (Exception e) {
+            log.debug("Could not read bot state for heartbeat: {}", e.getMessage());
+        }
+
+        String posStr = (pos != null) ? "Y=" + pos.y() : "Y=?";
+        String invStr = (invSummary != null) ? shorten(invSummary, 40) : "Inv ?";
+        String hpStr = (health != null)
+                ? "HP " + (int) health.health() + "/" + (int) health.maxHealth()
+                : "HP ?";
+
+        String msg = String.format("%s | %s | %s | %s | %s",
+                shorten(stepDesc, 60),
+                shorten(progress, 50),
+                posStr,
+                invStr,
+                hpStr);
+        return msg.length() > 250 ? msg.substring(0, 250) : msg;
+    }
+
+    /**
+     * Truncate a string to at most {@code maxLen} characters, appending {@code "…"} when
+     * truncation occurs. Returns the original string when it fits within the limit.
+     */
+    private String shorten(String value, int maxLen) {
+        if (value == null) {
+            return "";
+        }
+        return value.length() <= maxLen ? value : value.substring(0, maxLen - 1) + "…";
     }
 
     private void cleanExpiredDebounces() {

@@ -19,7 +19,7 @@ import java.util.Properties;
  * Spring Boot auto-configuration is avoided to prevent classpath scanning issues.
  */
 @Configuration
-@EnableJpaRepositories(basePackages = "com.mcagent.core.memory")
+@EnableJpaRepositories(basePackages = {"com.mcagent.core.memory", "com.mcagent.core.task"})
 public class JpaConfig {
 
     @Bean
@@ -42,7 +42,7 @@ public class JpaConfig {
     public LocalContainerEntityManagerFactoryBean entityManagerFactory(DataSource dataSource) {
         LocalContainerEntityManagerFactoryBean emf = new LocalContainerEntityManagerFactoryBean();
         emf.setDataSource(dataSource);
-        emf.setPackagesToScan("com.mcagent.core.memory");
+        emf.setPackagesToScan("com.mcagent.core.memory", "com.mcagent.core.task");
         emf.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
 
         Properties jpaProperties = new Properties();

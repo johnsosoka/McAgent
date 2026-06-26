@@ -20,6 +20,17 @@ bot:
       - "TNT"
       - "LAVA"
     max-mining-depth: 16
+  observation:
+    low-risk-threat-radius: 8
+  job:
+    heartbeat-grace-seconds: 60
+    heartbeat-cooldown-seconds: 60
+    suppress-if-recent-chat-seconds: 30
+  plan:
+    # Plans with more than this many steps are held for player approval.
+    approval-step-threshold: 3
+    # Plans whose total estimated wall-clock exceeds this (seconds) are held for approval.
+    approval-duration-seconds: 300
   reflex:
     enabled: true
     eat-threshold: 8

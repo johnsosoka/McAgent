@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-06-25 — Session: Sprint 13 — The Plan Layer
+
+**Branch:** `feature/sprint-13-plan-layer` (off Sprint 12)
+**Tests:** 409 total, 0 failures (+147 from Sprint 12)
+
+### What we shipped
+
+- **C1 — Plan / Executor foundation.** Typed sealed `Step` hierarchy (`NavigateStep`, `MineStep`, `WaitForStep`), `Plan` record, `TaskExecutor` interface, `DefaultTaskExecutor` with one-at-a-time CAS, `JobSupervisor` thread with 500ms polling, `SessionState` JPA entity, `SessionResumer` (5-minute resume window, server-address scoped). `submitPlan`/`getPlanStatus`/`cancelPlan` tools.
+- **A2 — LLM Planner role.** New `Planner` AI-Service (focused decomposer system prompt), `PlanDraft` → `PlanFromDraftConverter` → typed `Plan`. `decomposeAndExecute` tool routes complex multi-step requests through it. GITM-style decomposer/executor split.
+- **A3 — Heartbeat.** Once-per-minute structured progress messages on long-running jobs. Suppressed for 30s after any player chat. `JobTracker` extended with interaction/heartbeat timestamps.
+- **A5 — Tool post-conditions.** Sealed `PostCondition` hierarchy + checker + registry on `MinecraftTools`. Synchronous tools (placeBlockAt, eat, torch) get true verification framework messages; async tools (mineResource, navigateTo, buildArea) get `"verification pending"` to avoid false negatives.
+- **A6 — Task-aware observer.** When a Plan is RUNNING, threat alerts beyond `lowRiskThreatRadius` (default 8) are suppressed and counted.
+- **Q3 — Approval gate.** Plans with > 3 steps OR > 5 min total timeout get held as `PENDING_APPROVAL`. `decomposeAndExecute` returns a preview; player types `agent go` to start.
+- **Q8 — Concurrency tests.** 12 new tests across `BotEventQueueTest` and `JobSupervisorConcurrencyTest` covering dedup, priority, eviction, shutdown races, supervisor cancellation.
+
+### Notable code review findings (all fixed)
+
+- `PlanApprovalGate` NPE on null-timeout steps → null-safe.
+- `WaitCondition` discriminator three-way mismatch (`"kind"` vs `"type"`) → standardized on `"type"`.
+- Async post-condition false negatives → sync/async split in registry.
+- `Planner` LLM output retry-on-failure with user-friendly fallback.
+- `SessionResumer` `serverAddress` race → null guard + required init.
+- `JobSupervisor` counter double-counting, missing top-level exception handler, volatile `AtomicBoolean` misuse → all fixed.
+
+### Deferred to later sprints
+
+- Crafting / smelting / chest interaction (deep MC API) → Sprint 14 routines or later.
+- `JobSupervisor` async post-condition verification via Baritone callbacks → Sprint 14.
+- Plan failure escalation to LLM (DEPS pattern) → Sprint 14 Q1.
+
+### Next
+
+Hand `e2e-validation/sprint-13-validation.md` to John. Begin Sprint 14 (Autonomy & Routines).
+
+---
+
 ## 2026-06-25 — Session: Sprint 12 — Bot Stays Alive
 
 **Branch:** `feature/sprint-12-survival` (off Sprint 11)

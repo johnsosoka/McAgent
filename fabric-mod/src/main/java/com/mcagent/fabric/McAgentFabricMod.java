@@ -7,6 +7,10 @@ import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.core.reflex.SurvivalReflexes;
+import com.mcagent.core.task.DefaultTaskExecutor;
+import com.mcagent.core.task.PendingApprovalStore;
+import com.mcagent.core.task.SessionResumer;
+import com.mcagent.core.task.TaskExecutor;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
@@ -187,6 +191,7 @@ public class McAgentFabricMod implements ClientModInitializer {
             JobTracker jobTracker = springContext.getBean(JobTracker.class);
             RunLog runLog = springContext.getBean(RunLog.class);
             SurvivalReflexes survivalReflexes = springContext.getBean(SurvivalReflexes.class);
+            TaskExecutor taskExecutor = springContext.getBean(TaskExecutor.class);
             autonomousObserver = new AutonomousObserver(
                     botOps, botEventQueue, botProperties.getObservation(),
                     jobTracker, counters, runLog, botOps,
@@ -200,16 +205,45 @@ public class McAgentFabricMod implements ClientModInitializer {
                     },
                     worldStateCache,
                     survivalReflexes,
-                    botProperties);
+                    botProperties,
+                    taskExecutor,
+                    botOps);
 
-            chatHandler = new FabricChatHandler(botEventQueue, autonomousObserver, botOps, jobTracker, counters);
+            PendingApprovalStore pendingApprovalStore = springContext.getBean(PendingApprovalStore.class);
+            chatHandler = new FabricChatHandler(botEventQueue, autonomousObserver, botOps, jobTracker, counters,
+                    runLog, taskExecutor, pendingApprovalStore);
             botEventQueue.start(langChainService);
+
+            // Wire the current server address into the task executor for session scoping.
+            String serverAddress = resolveServerAddress();
+            ((DefaultTaskExecutor) taskExecutor).setServerAddress(serverAddress);
+
+            // Attempt to resume a plan interrupted by a recent disconnect.
+            SessionResumer sessionResumer = springContext.getBean(SessionResumer.class);
+            sessionResumer.tryResume(serverAddress);
 
             LOGGER.info("McAgent initialized successfully. Beans: {}",
                     springContext.getBeanDefinitionCount());
         } catch (Exception e) {
             LOGGER.error("Failed to initialize McAgent Spring context", e);
         }
+    }
+
+    /**
+     * Resolve the current server address for session scoping.
+     * Returns the server IP for multiplayer, or "single-player" for LAN/integrated.
+     */
+    private String resolveServerAddress() {
+        try {
+            var mc = Minecraft.getInstance();
+            if (mc != null && mc.getCurrentServer() != null) {
+                String ip = mc.getCurrentServer().ip;
+                return (ip != null && !ip.isBlank()) ? ip : "single-player";
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Could not resolve server address: {}", e.getMessage());
+        }
+        return "single-player";
     }
 
     private void shutdownSpringContext() {

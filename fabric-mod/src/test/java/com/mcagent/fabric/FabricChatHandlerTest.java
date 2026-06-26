@@ -1,8 +1,17 @@
 package com.mcagent.fabric;
 
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.core.task.NavigateStep;
+import com.mcagent.core.task.PendingApprovalStore;
+import com.mcagent.core.task.Plan;
+import com.mcagent.core.task.RetryPolicy;
+import com.mcagent.core.task.TaskExecutor;
+import com.mcagent.core.task.TaskSnapshot;
+import com.mcagent.core.task.TaskState;
+import com.mcagent.core.task.TerminationPolicy;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
+import com.mcagent.core.telemetry.RunLog;
 import com.mcagent.fabric.observer.AutonomousObserver;
 import com.mcagent.fabric.queue.BotEventQueue;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,10 +20,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -42,6 +56,13 @@ class FabricChatHandlerTest {
     @Mock
     private JobTracker jobTracker;
 
+    @Mock
+    private RunLog runLog;
+
+    @Mock
+    private TaskExecutor taskExecutor;
+
+    private PendingApprovalStore pendingApprovalStore;
     private Counters counters;
     private FabricChatHandler handler;
     private List<String> sentMessages;
@@ -49,12 +70,13 @@ class FabricChatHandlerTest {
     @BeforeEach
     void setUp() {
         counters = new Counters();
+        pendingApprovalStore = new PendingApprovalStore();
         sentMessages = new ArrayList<>();
         // Use the package-private constructor to inject a recording sender instead of
         // FabricChatSender.send(), which would try to load net.minecraft.client.Minecraft.
         handler = new FabricChatHandler(
                 botEventQueue, autonomousObserver, botOperations, jobTracker,
-                counters, sentMessages::add);
+                counters, runLog, taskExecutor, pendingApprovalStore, sentMessages::add);
     }
 
     // --- Hard-stop bypass ---
@@ -73,6 +95,15 @@ class FabricChatHandlerTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void stop_clearsPendingApprovalPlan() {
+        pendingApprovalStore.set(makePlan("Mine iron"));
+
+        handler.handleToggleCommand("stop");
+
+        assertThat(pendingApprovalStore.peek()).isEmpty();
     }
 
     @Test
@@ -273,5 +304,98 @@ class FabricChatHandlerTest {
 
         assertThat(consumed).isTrue();
         assertThat(sentMessages.get(0).length()).isLessThanOrEqualTo(250);
+    }
+
+    // --- Plan approval bypass (agent go / agent approved) ---
+
+    @Test
+    void agent_go_submitsPendingPlan_sendsAck_clearsStore() {
+        Plan plan = makePlan("Mine iron ore");
+        pendingApprovalStore.set(plan);
+
+        UUID taskId = UUID.randomUUID();
+        when(taskExecutor.submit(any())).thenReturn(
+                new TaskSnapshot(taskId, plan, TaskState.RUNNING, 0, "starting",
+                        Instant.now(), Optional.empty()));
+
+        boolean consumed = handler.handleToggleCommand("go");
+
+        assertThat(consumed).isTrue();
+        verify(taskExecutor).submit(plan);
+        assertThat(pendingApprovalStore.peek()).isEmpty();
+        assertThat(sentMessages).hasSize(1);
+        assertThat(sentMessages.get(0)).contains("Plan started").contains("Mine iron ore");
+    }
+
+    @Test
+    void agent_approved_submitsPendingPlan_asAlias() {
+        Plan plan = makePlan("Explore area");
+        pendingApprovalStore.set(plan);
+
+        UUID taskId = UUID.randomUUID();
+        when(taskExecutor.submit(any())).thenReturn(
+                new TaskSnapshot(taskId, plan, TaskState.RUNNING, 0, "starting",
+                        Instant.now(), Optional.empty()));
+
+        boolean consumed = handler.handleToggleCommand("approved");
+
+        assertThat(consumed).isTrue();
+        verify(taskExecutor).submit(plan);
+        assertThat(sentMessages.get(0)).contains("Plan started");
+    }
+
+    @Test
+    void agent_go_withNoPending_repliesEmpty() {
+        // Store is empty — no plan pending
+
+        boolean consumed = handler.handleToggleCommand("go");
+
+        assertThat(consumed).isTrue();
+        verify(taskExecutor, never()).submit(any());
+        assertThat(sentMessages).containsExactly("No plan pending approval.");
+    }
+
+    @Test
+    void agent_go_withPrefix_isAlsoHandled() {
+        // "go now" should also trigger the bypass
+        Plan plan = makePlan("Build base");
+        pendingApprovalStore.set(plan);
+
+        UUID taskId = UUID.randomUUID();
+        when(taskExecutor.submit(any())).thenReturn(
+                new TaskSnapshot(taskId, plan, TaskState.RUNNING, 0, "starting",
+                        Instant.now(), Optional.empty()));
+
+        boolean consumed = handler.handleToggleCommand("go now");
+
+        assertThat(consumed).isTrue();
+        verify(taskExecutor).submit(plan);
+    }
+
+    @Test
+    void agent_go_submitFailure_sendsFriendlyErrorMessage() {
+        Plan plan = makePlan("Mine coal");
+        pendingApprovalStore.set(plan);
+
+        when(taskExecutor.submit(any())).thenThrow(new IllegalStateException("A plan is already running"));
+
+        boolean consumed = handler.handleToggleCommand("go");
+
+        assertThat(consumed).isTrue();
+        assertThat(sentMessages).hasSize(1);
+        assertThat(sentMessages.get(0)).contains("Failed to start plan");
+        assertThat(sentMessages.get(0)).contains("A plan is already running");
+    }
+
+    // --- Helpers ---
+
+    private static Plan makePlan(String summary) {
+        return new Plan(
+                UUID.randomUUID(),
+                summary,
+                "player",
+                Instant.now(),
+                List.of(new NavigateStep(0, 64, 0, Duration.ofMinutes(5), RetryPolicy.NONE)),
+                TerminationPolicy.DEFAULT);
     }
 }

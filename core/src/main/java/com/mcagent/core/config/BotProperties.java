@@ -18,6 +18,8 @@ public class BotProperties {
     private SafetyProperties safety = new SafetyProperties();
     private ObservationProperties observation = new ObservationProperties();
     private ReflexProperties reflex = new ReflexProperties();
+    private JobProperties job = new JobProperties();
+    private PlanProperties plan = new PlanProperties();
 
     @Data
     public static class ChatProperties {
@@ -108,6 +110,68 @@ public class BotProperties {
         private int debounceSeconds = 10;
         private boolean trackPassiveMobs = true;
         private List<String> passiveMobTypes = List.of("Pig", "Cow", "Chicken", "Sheep");
+
+        /**
+         * Maximum threat distance (blocks) to publish when a low-risk task is RUNNING.
+         * Threats beyond this radius are suppressed so the LLM is not interrupted during
+         * routine long-running operations such as mining. Threats within the radius are
+         * always published regardless of task state.
+         *
+         * <p>Default: 8 blocks (approximately one combat range).</p>
+         */
+        private int lowRiskThreatRadius = 8;
+    }
+
+    /**
+     * Configuration for the heartbeat emitted when a Plan is RUNNING.
+     *
+     * <p>Heartbeats provide brief structured progress updates via outbound chat so the
+     * player can track long-running tasks without issuing a {@code status} command.</p>
+     */
+    @Data
+    public static class JobProperties {
+
+        /**
+         * Seconds a plan must be RUNNING before the first heartbeat is emitted.
+         * Default: 60s — suppresses noise for short tasks that complete quickly.
+         */
+        private int heartbeatGraceSeconds = 60;
+
+        /**
+         * Minimum seconds between consecutive heartbeat messages.
+         * Default: 60s — at most one heartbeat per minute.
+         */
+        private int heartbeatCooldownSeconds = 60;
+
+        /**
+         * Suppress heartbeats when the player sent a message within this many seconds.
+         * Default: 30s — avoids interrupting an active conversation.
+         */
+        private int suppressIfRecentChatSeconds = 30;
+    }
+
+    /**
+     * Configuration for the pre-execution approval gate ({@link com.mcagent.core.task.PlanApprovalGate}).
+     *
+     * <p>Plans exceeding any of these thresholds are held as
+     * {@link com.mcagent.core.task.TaskState#PENDING_APPROVAL} until the player
+     * confirms with {@code agent go} or {@code agent approved}.</p>
+     */
+    @Data
+    public static class PlanProperties {
+
+        /**
+         * Plans with more than this many steps are flagged for approval.
+         * Default: 3 steps.
+         */
+        private int approvalStepThreshold = 3;
+
+        /**
+         * Plans whose total estimated wall-clock duration exceeds this value
+         * (in seconds) are flagged for approval.
+         * Default: 300s (5 minutes).
+         */
+        private int approvalDurationSeconds = 300;
     }
 
     /**

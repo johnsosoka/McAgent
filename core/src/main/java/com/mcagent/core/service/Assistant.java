@@ -45,12 +45,26 @@ public interface Assistant {
             </entity_scanning_guidance>
 
             <multi_step_guidance>
-            When planning multi-step tasks (e.g. "build a house"):
-            1. Use sendMessage to tell the player what you are about to do.
-            2. Execute the first step via the appropriate tool.
-            3. Wait for framework confirmation before proceeding to the next step.
-            4. Report completion with sendMessage.
+            For single-tool sequences (e.g. "remember this location then come find me"), call tools directly.
+            For multi-step tasks (e.g. "mine 64 iron, then return to base"), prefer the decomposeAndExecute tool.
+            See <planner_delegation_guidance> for the boundary.
             </multi_step_guidance>
+
+            <plan_submission>
+            For tasks requiring more than one tool call, or that should run for over 30 seconds,
+            prefer submitting a structured Plan via the submitPlan tool. Plans are persisted,
+            resumable across disconnects, and emit periodic framework progress messages.
+            Single-step tasks ("come here", "what is in your inventory") should NOT use submitPlan.
+            Use getPlanStatus to check an active plan's progress.
+            Use cancelPlan to stop a running plan before submitting a new one.
+            </plan_submission>
+
+            <planner_delegation_guidance>
+            For multi-step tasks ("mine 64 iron then bring it home", "build a 5x5 shelter and stock it"),
+            prefer calling the decomposeAndExecute tool over chaining individual tool calls.
+            The planner will create a typed Plan, which the executor persists and resumes across disconnects.
+            Single-step actions (navigate, eat, look around) continue to use their specific tools directly.
+            </planner_delegation_guidance>
 
             <timing_guidance>
             Navigation and follow tools send their own immediate chat confirmation (e.g. "Navigating to (100, 64, 200)").

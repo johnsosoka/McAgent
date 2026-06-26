@@ -1,0 +1,54 @@
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+
+bot:
+  name: "TestBot"
+  trigger-words:
+    - "bot"
+  chat:
+    working-window: 12
+    summary-trigger: 8
+    summary-max-chars: 800
+    max-history: 20
+    response-timeout-seconds: 30
+    min-interval-ms: 0
+  safety:
+    require-confirmation-for-dangerous: false
+    dangerous-blocks:
+      - "TNT"
+    max-mining-depth: 16
+  reflex:
+    enabled: false
+    eat-threshold: 8
+    health-critical-pct: 30
+    flee-distance: 16
+    dark-light-threshold: 7
+
+llm:
+  primary-provider: fireworks
+  fireworks:
+    base-url: "https://api.fireworks.ai/inference/v1"
+    api-key: "test-key"
+    model: "accounts/fireworks/models/kimi-k2p5"
+    temperature: 0.7
+    timeout-seconds: 30
+    max-tokens: 2048
+  embedding:
+    provider: fireworks
+    model: "nomic-ai/nomic-embed-text-v1.5"
+
+vector-store:
+  type: in-memory
+  in-memory:
+    persist-path: ./target/test-vector-store.json

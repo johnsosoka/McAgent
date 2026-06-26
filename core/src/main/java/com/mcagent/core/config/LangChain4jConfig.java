@@ -3,6 +3,7 @@ package com.mcagent.core.config;
 import com.mcagent.core.memory.chat.LayeredChatMemory;
 import com.mcagent.core.memory.chat.RollingSummaryService;
 import com.mcagent.core.service.Assistant;
+import com.mcagent.core.service.Planner;
 import com.mcagent.core.tools.MinecraftTools;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
@@ -64,6 +65,21 @@ public class LangChain4jConfig {
                 .chatModel(chatModel)
                 .chatMemory(chatMemory)
                 .tools(tools)
+                .build();
+    }
+
+    /**
+     * Stateless planner role (GITM-style Decomposer).
+     *
+     * <p>No memory, no tools — the planner's only job is to turn a natural-language
+     * player request into a structured {@link com.mcagent.core.service.PlanDraft}.
+     * Sprint 14 P6 will route this to a dedicated cheaper model endpoint; for
+     * Sprint 13 v1 it shares the same {@code ChatModel} as the {@link Assistant}.</p>
+     */
+    @Bean
+    public Planner planner(ChatModel chatModel) {
+        return AiServices.builder(Planner.class)
+                .chatModel(chatModel)
                 .build();
     }
 

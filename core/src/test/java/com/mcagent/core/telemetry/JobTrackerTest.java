@@ -143,4 +143,47 @@ class JobTrackerTest {
 
         assertThat(tracker.getLastDeath().get().location()).isEqualTo(second);
     }
+
+    // -----------------------------------------------------------------------
+    // Heartbeat tests (A3)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void markPlayerInteraction_updatesTimestamp() {
+        Instant before = Instant.now();
+
+        tracker.markPlayerInteraction();
+
+        // shouldSendHeartbeat with a very short suppressWindow must return false
+        // immediately after markPlayerInteraction, confirming the timestamp was set.
+        boolean result = tracker.shouldSendHeartbeat(Duration.ZERO, Duration.ofSeconds(60));
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    void shouldSendHeartbeat_trueWhenBothCleared() {
+        // Neither heartbeat cooldown nor player-interaction suppress window are active
+        // when both timers are at EPOCH — both durations compared against "a very long time ago"
+        // should pass immediately.
+        boolean result = tracker.shouldSendHeartbeat(Duration.ofSeconds(1), Duration.ofSeconds(1));
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    void shouldSendHeartbeat_falseWhenRecentHeartbeat() {
+        tracker.markHeartbeatSent();
+
+        // Cooldown of 60s has clearly not elapsed yet.
+        boolean result = tracker.shouldSendHeartbeat(Duration.ofSeconds(60), Duration.ofSeconds(1));
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    void shouldSendHeartbeat_falseWhenRecentPlayerInteraction() {
+        tracker.markPlayerInteraction();
+
+        // Suppress window of 60s has not elapsed — player just chatted.
+        boolean result = tracker.shouldSendHeartbeat(Duration.ofSeconds(1), Duration.ofSeconds(60));
+        assertThat(result).isFalse();
+    }
 }

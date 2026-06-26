@@ -5,23 +5,41 @@ import com.mcagent.core.model.PathResult;
 import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
+import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.service.PlanDraft;
+import com.mcagent.core.service.Planner;
 import com.mcagent.core.service.SafetyValidator;
 import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.PlayerNoteService;
 import com.mcagent.core.memory.VectorMemoryService;
+import com.mcagent.core.task.MineStep;
+import com.mcagent.core.task.NavigateStep;
+import com.mcagent.core.task.PendingApprovalStore;
+import com.mcagent.core.task.Plan;
+import com.mcagent.core.task.PlanApprovalGate;
+import com.mcagent.core.task.RetryPolicy;
+import com.mcagent.core.task.TaskExecutor;
+import com.mcagent.core.task.TaskSnapshot;
+import com.mcagent.core.task.TaskState;
+import com.mcagent.core.task.TerminationPolicy;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,6 +47,7 @@ class MinecraftToolsTest {
 
     private BotOperations bot;
     private ChatService chatService;
+    private LangChain4jService langChain4jService;
     private LocationMemoryService locationMemory;
     private VectorMemoryService vectorMemory;
     private PlayerNoteService playerNoteService;
@@ -36,6 +55,10 @@ class MinecraftToolsTest {
     private JobTracker jobTracker;
     private Counters counters;
     private RunLog runLog;
+    private TaskExecutor taskExecutor;
+    private Planner planner;
+    private PlanApprovalGate approvalGate;
+    private PendingApprovalStore pendingApprovalStore;
     private MinecraftTools tools;
 
     @BeforeEach
@@ -45,15 +68,25 @@ class MinecraftToolsTest {
         vectorMemory = mock(VectorMemoryService.class);
         playerNoteService = mock(PlayerNoteService.class);
         chatService = mock(ChatService.class);
+        langChain4jService = mock(LangChain4jService.class);
         safetyValidator = mock(SafetyValidator.class);
         jobTracker = mock(JobTracker.class);
         counters = mock(Counters.class);
         runLog = mock(RunLog.class);
+        taskExecutor = mock(TaskExecutor.class);
+        planner = mock(Planner.class);
+        approvalGate = mock(PlanApprovalGate.class);
+        pendingApprovalStore = mock(PendingApprovalStore.class);
         // Default: all actions approved
         when(safetyValidator.validate(any(), anyInt()))
                 .thenReturn(SafetyValidator.ValidationResult.approved());
         when(bot.getCurrentPosition()).thenReturn(new BotOperations.Location(0, 64, 0));
-        tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService, safetyValidator, jobTracker, counters, runLog);
+        // Default: no approval required (tests that need it override this)
+        when(approvalGate.requiresApproval(any())).thenReturn(false);
+        tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService,
+                safetyValidator, jobTracker, counters, runLog, taskExecutor, planner,
+                approvalGate, pendingApprovalStore);
+        tools.setLangChain4jService(langChain4jService);
     }
 
     @Test
@@ -692,5 +725,394 @@ class MinecraftToolsTest {
 
         assertThat(result).contains("Cannot interact with LAVA");
         verify(bot, never()).placeBlock(anyInt(), anyInt(), anyInt(), any());
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 13 C1 — submitPlan tool
+    // -------------------------------------------------------------------------
+
+    @Test
+    void submitPlan_successPath_callsExecutorAndReturnsConfirmation() {
+        Plan capturedPlan[] = new Plan[1];
+        UUID taskId = UUID.randomUUID();
+
+        when(taskExecutor.submit(any())).thenAnswer(inv -> {
+            Plan plan = inv.getArgument(0);
+            capturedPlan[0] = plan;
+            return new TaskSnapshot(taskId, plan, TaskState.RUNNING, 0, "starting",
+                    Instant.now(), Optional.empty());
+        });
+
+        String stepsJson = """
+                [{"type":"Navigate","x":100,"y":64,"z":200,"timeout":"PT5M","retry":{"maxRetries":0,"backoff":"PT0S"}}]
+                """;
+
+        String result = tools.submitPlan("Navigate to base", stepsJson);
+
+        assertThat(result).contains("Plan submitted");
+        assertThat(result).contains("Navigate to base");
+        assertThat(result).contains("1 steps");
+        verify(taskExecutor).submit(any());
+        verify(chatService).send(contains("Plan submitted"));
+    }
+
+    @Test
+    void submitPlan_invalidJson_returnsErrorMessage() {
+        String result = tools.submitPlan("Bad plan", "not-valid-json");
+
+        assertThat(result).contains("Invalid steps JSON");
+        verify(taskExecutor, never()).submit(any());
+    }
+
+    @Test
+    void submitPlan_emptySteps_returnsErrorMessage() {
+        String result = tools.submitPlan("Empty plan", "[]");
+
+        assertThat(result).contains("empty");
+        verify(taskExecutor, never()).submit(any());
+    }
+
+    @Test
+    void submitPlan_alreadyRunning_returnsConflictMessage() {
+        when(taskExecutor.submit(any())).thenThrow(new IllegalStateException("A plan is already running"));
+
+        String stepsJson = """
+                [{"type":"Navigate","x":10,"y":64,"z":20,"timeout":"PT1M","retry":{"maxRetries":0,"backoff":"PT0S"}}]
+                """;
+
+        String result = tools.submitPlan("Second plan", stepsJson);
+
+        assertThat(result).contains("already running");
+    }
+
+    @Test
+    void getPlanStatus_returnsStatusWhenActive() {
+        Plan plan = new Plan(UUID.randomUUID(), "Mine iron", "player", Instant.now(),
+                List.of(new NavigateStep(10, 64, 20, Duration.ofMinutes(5), RetryPolicy.NONE)),
+                TerminationPolicy.DEFAULT);
+        TaskSnapshot snap = new TaskSnapshot(plan.id(), plan, TaskState.RUNNING, 0,
+                "10 blocks away", Instant.now(), Optional.empty());
+
+        when(taskExecutor.currentTask()).thenReturn(Optional.of(snap));
+
+        String result = tools.getPlanStatus();
+
+        assertThat(result).contains("Mine iron");
+        assertThat(result).contains("RUNNING");
+    }
+
+    @Test
+    void getPlanStatus_returnsNoneWhenIdle() {
+        when(taskExecutor.currentTask()).thenReturn(Optional.empty());
+
+        String result = tools.getPlanStatus();
+
+        assertThat(result).contains("No active plan");
+    }
+
+    @Test
+    void cancelPlan_cancelsRunningPlan() {
+        UUID taskId = UUID.randomUUID();
+        Plan plan = new Plan(taskId, "Mine iron", "player", Instant.now(),
+                List.of(new NavigateStep(10, 64, 20, Duration.ofMinutes(5), RetryPolicy.NONE)),
+                TerminationPolicy.DEFAULT);
+        TaskSnapshot snap = new TaskSnapshot(taskId, plan, TaskState.RUNNING, 0,
+                "", Instant.now(), Optional.empty());
+
+        when(taskExecutor.currentTask()).thenReturn(Optional.of(snap));
+        when(taskExecutor.cancel(taskId)).thenReturn(true);
+
+        String result = tools.cancelPlan();
+
+        assertThat(result).contains("cancelled");
+        assertThat(result).contains("Mine iron");
+        verify(taskExecutor).cancel(taskId);
+    }
+
+    @Test
+    void cancelPlan_noActivePlan_returnsNothingToCancel() {
+        when(taskExecutor.currentTask()).thenReturn(Optional.empty());
+
+        String result = tools.cancelPlan();
+
+        assertThat(result).contains("No active plan");
+        verify(taskExecutor, never()).cancel(any());
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 13 A5 — post-condition framework messages
+    // -------------------------------------------------------------------------
+
+    @Test
+    void mineResource_emitsAsyncPendingMessage_notImmediateDelta() {
+        // mineResource is async (Baritone) — Fix 3 changed it to emit "verification pending"
+        // instead of an immediate (and incorrect) delta against an unchanged inventory.
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.approved());
+        when(bot.countItem("minecraft:iron_ore")).thenReturn(0);
+        when(bot.mine(anyString(), anyInt(), anyInt())).thenReturn(
+                com.mcagent.core.model.PathResult.builder()
+                        .success(true)
+                        .message("Mining started")
+                        .type(com.mcagent.core.model.PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        tools.mineResource("minecraft:iron_ore", 4, 32);
+
+        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(langChain4jService).addFrameworkContext(captor.capture());
+        String msg = captor.getValue();
+        assertThat(msg).contains("tool:mineResource");
+        assertThat(msg).contains("expected:");
+        assertThat(msg).contains("async, verification pending");
+        // Must NOT report a delta that would be a false negative.
+        assertThat(msg).doesNotContain("observed:");
+        assertThat(msg).doesNotContain("short");
+    }
+
+    @Test
+    void mineResource_asyncBehavior_inventoryNotSampledAfterReturn() {
+        // Verify that bot.countItem is NOT called after the tool returns (no "after" snapshot).
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.approved());
+        when(bot.countItem("minecraft:iron_ore")).thenReturn(0);
+        when(bot.mine(anyString(), anyInt(), anyInt())).thenReturn(
+                com.mcagent.core.model.PathResult.builder()
+                        .success(true)
+                        .message("Mining started")
+                        .type(com.mcagent.core.model.PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        tools.mineResource("minecraft:iron_ore", 4, 32);
+
+        // For async tools no before snapshot is captured either — countItem called 0 times.
+        verify(bot, never()).countItem("minecraft:iron_ore");
+    }
+
+    @Test
+    void followPlayer_doesNotEmitFrameworkMessage_forNoOpTool() {
+        when(bot.followPlayer(anyString())).thenReturn(
+                com.mcagent.core.model.PathResult.builder()
+                        .success(true)
+                        .message("Following")
+                        .type(com.mcagent.core.model.PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        tools.followPlayer("steve");
+
+        verify(langChain4jService, never()).addFrameworkContext(anyString());
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 13 A2 — decomposeAndExecute tool
+    // -------------------------------------------------------------------------
+
+    @Test
+    void decomposeAndExecute_callsPlannerAndSubmitsToExecutor() {
+        // Planner returns a single-navigate draft
+        PlanDraft draft = new PlanDraft(
+                "Navigate to base",
+                List.of(Map.of("type", "Navigate", "x", 100, "y", 64, "z", 200))
+        );
+        when(planner.propose("go to base")).thenReturn(draft);
+
+        UUID taskId = UUID.randomUUID();
+        when(taskExecutor.submit(any())).thenAnswer(inv -> {
+            Plan plan = inv.getArgument(0);
+            return new TaskSnapshot(taskId, plan, TaskState.RUNNING, 0, "starting",
+                    Instant.now(), Optional.empty());
+        });
+
+        String result = tools.decomposeAndExecute("go to base");
+
+        verify(planner).propose("go to base");
+        verify(taskExecutor).submit(any());
+        verify(chatService).send(contains("Plan submitted"));
+        assertThat(result).contains("Plan submitted");
+        assertThat(result).contains("Navigate to base");
+        assertThat(result).contains("1 steps");
+    }
+
+    @Test
+    void decomposeAndExecute_returnsPlanRejectedMessage_whenDraftIsInvalid() {
+        // Planner returns a draft with a null summary — converter will reject it
+        PlanDraft badDraft = new PlanDraft(null, List.of(Map.of("type", "Navigate", "x", 0, "y", 64, "z", 0)));
+        when(planner.propose("bad request")).thenReturn(badDraft);
+
+        String result = tools.decomposeAndExecute("bad request");
+
+        verify(planner).propose("bad request");
+        verify(taskExecutor, never()).submit(any());
+        assertThat(result).contains("Plan rejected");
+    }
+
+    @Test
+    void decomposeAndExecute_returnsPlanRejectedMessage_whenStepTypeIsUnknown() {
+        PlanDraft draft = new PlanDraft(
+                "Craft a pickaxe",
+                List.of(Map.of("type", "Craft", "item", "minecraft:iron_pickaxe"))
+        );
+        when(planner.propose("craft a pickaxe")).thenReturn(draft);
+
+        String result = tools.decomposeAndExecute("craft a pickaxe");
+
+        verify(planner).propose("craft a pickaxe");
+        verify(taskExecutor, never()).submit(any());
+        assertThat(result).contains("Plan rejected");
+        assertThat(result).contains("Craft");
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 13 Q3 — pre-execution approval gate
+    // -------------------------------------------------------------------------
+
+    @Test
+    void decomposeAndExecute_pendingApprovalForComplexPlan_returnsPreviewNotSubmission() {
+        // 4-step plan (exceeds threshold of 3)
+        PlanDraft draft = new PlanDraft(
+                "Mine and store iron",
+                List.of(
+                    Map.of("type", "Navigate", "x", 100, "y", 64, "z", 200),
+                    Map.of("type", "Mine", "blockType", "minecraft:iron_ore",
+                           "quantity", 64, "searchRadius", 32),
+                    Map.of("type", "Navigate", "x", 0, "y", 64, "z", 0),
+                    Map.of("type", "Mine", "blockType", "minecraft:iron_ore",
+                           "quantity", 64, "searchRadius", 32)
+                )
+        );
+        when(planner.propose("mine and store iron")).thenReturn(draft);
+        // Override: this plan requires approval
+        when(approvalGate.requiresApproval(any())).thenReturn(true);
+
+        String result = tools.decomposeAndExecute("mine and store iron");
+
+        // Executor must NOT be called
+        verify(taskExecutor, never()).submit(any());
+        // Plan must be stored for later approval
+        verify(pendingApprovalStore).set(any());
+        // Result is a preview, not a submission confirmation
+        assertThat(result).doesNotContain("Plan submitted");
+        assertThat(result).contains("Mine and store iron");
+        assertThat(result).contains("agent go");
+        // Preview length must be bounded
+        assertThat(result.length()).isLessThanOrEqualTo(240);
+    }
+
+    @Test
+    void formatPlanPreview_includesSummaryStepsAndEstimate() {
+        Plan plan = new Plan(UUID.randomUUID(), "Explore base", "player", Instant.now(),
+                List.of(
+                    new NavigateStep(10, 64, 20, Duration.ofMinutes(3), RetryPolicy.NONE),
+                    new MineStep("minecraft:iron_ore", 16, 32, Duration.ofMinutes(4), RetryPolicy.NONE)
+                ),
+                TerminationPolicy.DEFAULT);
+
+        String preview = tools.formatPlanPreview(plan);
+
+        assertThat(preview).contains("Explore base");
+        assertThat(preview).contains("1.");
+        assertThat(preview).contains("2.");
+        assertThat(preview).contains("7m");   // 3+4 = 7 minutes
+        assertThat(preview).contains("agent go");
+        assertThat(preview.length()).isLessThanOrEqualTo(240);
+    }
+
+    @Test
+    void formatPlanPreview_truncatesLongPlanToMaxLength() {
+        // Build a plan with many long step descriptions
+        List<com.mcagent.core.task.Step> steps = new java.util.ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            steps.add(new NavigateStep(i * 100, 64, i * 100, Duration.ofMinutes(10), RetryPolicy.NONE));
+        }
+        Plan plan = new Plan(UUID.randomUUID(),
+                "A very long plan with many steps to exercise truncation", "player", Instant.now(),
+                steps, TerminationPolicy.DEFAULT);
+
+        String preview = tools.formatPlanPreview(plan);
+
+        assertThat(preview.length()).isLessThanOrEqualTo(240);
+    }
+
+    // -------------------------------------------------------------------------
+    // Fix 3 — async tool must not report false failure
+    // -------------------------------------------------------------------------
+
+    @Test
+    void withToolScope_asyncTool_doesNotReportFalseFailure() {
+        when(safetyValidator.validate(any(), anyInt()))
+                .thenReturn(SafetyValidator.ValidationResult.approved());
+        // Inventory count unchanged (Baritone hasn't run yet — as expected for async).
+        when(bot.countItem("minecraft:iron_ore")).thenReturn(0);
+        when(bot.mine(anyString(), anyInt(), anyInt())).thenReturn(
+                com.mcagent.core.model.PathResult.builder()
+                        .success(true)
+                        .message("Mining started")
+                        .type(com.mcagent.core.model.PathResult.PathResultType.SUCCESS)
+                        .build()
+        );
+
+        tools.mineResource("minecraft:iron_ore", 4, 32);
+
+        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(langChain4jService).addFrameworkContext(captor.capture());
+        String msg = captor.getValue();
+        // Must say "verification pending", NOT report "observed: 0 (4 short)".
+        assertThat(msg).contains("verification pending");
+        assertThat(msg).doesNotContain("short");
+        assertThat(msg).doesNotContain("observed: +0");
+    }
+
+    // -------------------------------------------------------------------------
+    // Fix 4 — planner retry on failure
+    // -------------------------------------------------------------------------
+
+    @Test
+    void decomposeAndExecute_plannerFailsTwice_returnsUserFriendlyMessage() {
+        when(planner.propose(anyString()))
+                .thenThrow(new RuntimeException("LLM timeout"))
+                .thenThrow(new RuntimeException("LLM timeout again"));
+
+        String result = tools.decomposeAndExecute("mine 64 iron ore");
+
+        verify(planner, times(2)).propose("mine 64 iron ore");
+        verify(taskExecutor, never()).submit(any());
+        assertThat(result).contains("Planner failed");
+        assertThat(result).contains("rephrasing");
+    }
+
+    // -------------------------------------------------------------------------
+    // Fix 8 — replacement notice when pending plan already exists
+    // -------------------------------------------------------------------------
+
+    @Test
+    void decomposeAndExecute_replacesExistingPendingPlan_prependsNotice() {
+        // Existing pending plan
+        Plan existingPlan = new Plan(UUID.randomUUID(), "Old plan", "player", Instant.now(),
+                List.of(new NavigateStep(0, 64, 0, Duration.ofMinutes(2), RetryPolicy.NONE)),
+                TerminationPolicy.DEFAULT);
+        when(pendingApprovalStore.peek()).thenReturn(Optional.of(existingPlan));
+
+        // New plan requiring approval
+        PlanDraft draft = new PlanDraft(
+                "New plan",
+                List.of(
+                    Map.of("type", "Navigate", "x", 100, "y", 64, "z", 200),
+                    Map.of("type", "Mine", "blockType", "minecraft:iron_ore",
+                           "quantity", 64, "searchRadius", 32),
+                    Map.of("type", "Navigate", "x", 0, "y", 64, "z", 0),
+                    Map.of("type", "Mine", "blockType", "minecraft:iron_ore",
+                           "quantity", 64, "searchRadius", 32)
+                )
+        );
+        when(planner.propose(anyString())).thenReturn(draft);
+        when(approvalGate.requiresApproval(any())).thenReturn(true);
+
+        String result = tools.decomposeAndExecute("mine and store more iron");
+
+        assertThat(result).startsWith("Replacing previous pending plan.");
+        verify(pendingApprovalStore).set(any());
     }
 }

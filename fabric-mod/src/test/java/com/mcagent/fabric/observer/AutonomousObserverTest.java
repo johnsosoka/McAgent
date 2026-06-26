@@ -7,7 +7,12 @@ import com.mcagent.core.reflex.SurvivalReflexes;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.BotOperations.HealthStatus;
 import com.mcagent.core.service.BotOperations.ThreatInfo;
+import com.mcagent.core.service.ops.InventoryOperations;
 import com.mcagent.core.service.ops.ObservationOperations;
+import com.mcagent.core.task.Plan;
+import com.mcagent.core.task.TaskExecutor;
+import com.mcagent.core.task.TaskSnapshot;
+import com.mcagent.core.task.TaskState;
 import com.mcagent.fabric.cache.WorldStateCache;
 import com.mcagent.fabric.queue.BotEventQueue;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,7 +22,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -39,6 +48,12 @@ class AutonomousObserverTest {
 
     @Mock
     private SurvivalReflexes survivalReflexes;
+
+    @Mock
+    private TaskExecutor taskExecutor;
+
+    @Mock
+    private InventoryOperations inventoryOps;
 
     private BotProperties.ObservationProperties config;
     private AutonomousObserver observer;
@@ -245,7 +260,9 @@ class AutonomousObserverTest {
                 () -> null,
                 cache,
                 survivalReflexes,
-                botProps);
+                botProps,
+                null,   // no task executor in reflex tests
+                null);  // no inventoryOps in reflex tests
 
         // Cache is warm so scan() reads from it; no bridge calls are needed.
         when(survivalReflexes.tickReflexes(any(ReflexSnapshot.class)))
@@ -285,7 +302,9 @@ class AutonomousObserverTest {
                 () -> null,
                 cache,
                 survivalReflexes,
-                botProps);
+                botProps,
+                null,   // no task executor in reflex tests
+                null);  // no inventoryOps in reflex tests
 
         // Cache is warm; scan finds no threats/opportunities and returns early — no bridge calls.
         tickToScan();
@@ -322,7 +341,9 @@ class AutonomousObserverTest {
                 () -> null,
                 cache,
                 survivalReflexes,
-                botProps);
+                botProps,
+                null,   // no task executor in reflex tests
+                null);  // no inventoryOps in reflex tests
 
         // Cache is warm; scan finds no threats/opportunities and returns early — no bridge calls.
         tickToScan();
@@ -348,7 +369,9 @@ class AutonomousObserverTest {
                 () -> null,
                 cache,
                 survivalReflexes,
-                botProps);
+                botProps,
+                null,   // no task executor in reflex tests
+                null);  // no inventoryOps in reflex tests
 
         when(botOperations.getNearbyThreats(anyInt())).thenReturn(List.of());
         when(botOperations.getNearbyEntities(anyString(), anyInt())).thenReturn(List.of());
@@ -358,10 +381,222 @@ class AutonomousObserverTest {
         verify(survivalReflexes, never()).tickReflexes(any());
     }
 
+    // -----------------------------------------------------------------------
+    // Task-aware observer (A6) tests
+    // -----------------------------------------------------------------------
+
+    @Test
+    void threatPublished_whenNoTaskActive() {
+        // No active task — taskExecutor returns empty. Threat should publish normally.
+        when(taskExecutor.currentTask()).thenReturn(Optional.empty());
+        var threat = new ThreatInfo("Zombie", new BotOperations.Location(10, 64, 20), 20.0, "NE");
+        when(botOperations.getNearbyThreats(32)).thenReturn(List.of(threat));
+
+        AutonomousObserver obs = observerWithTaskExecutor(taskExecutor);
+        tickToScan(obs);
+
+        verify(eventQueue).publishFramework(anyString());
+    }
+
+    @Test
+    void threatSuppressed_whenLowRiskTaskActive_andThreatBeyondRadius() {
+        // Task is RUNNING (low-risk), threat is 20 blocks away — beyond default radius of 8.
+        // Expect: no publish, counter incremented.
+        TaskSnapshot snapshot = runningTaskSnapshot();
+        when(taskExecutor.currentTask()).thenReturn(Optional.of(snapshot));
+        var threat = new ThreatInfo("Zombie", new BotOperations.Location(10, 64, 20), 20.0, "NE");
+        when(botOperations.getNearbyThreats(32)).thenReturn(List.of(threat));
+
+        com.mcagent.core.telemetry.Counters counters = new com.mcagent.core.telemetry.Counters();
+        AutonomousObserver obs = observerWithTaskExecutorAndCounters(taskExecutor, counters);
+        tickToScan(obs);
+
+        verify(eventQueue, never()).publishFramework(anyString());
+        verify(eventQueue, never()).triggerUrgentFramework(anyString());
+        assertThat(counters.get("observation.suppressed")).isEqualTo(1);
+    }
+
+    @Test
+    void threatPublished_whenLowRiskTaskActive_butThreatWithinRadius() {
+        // Task is RUNNING, but threat is only 5 blocks away — within the 8-block radius.
+        // Expect: publish fires despite the active task.
+        TaskSnapshot snapshot = runningTaskSnapshot();
+        when(taskExecutor.currentTask()).thenReturn(Optional.of(snapshot));
+        var threat = new ThreatInfo("Creeper", new BotOperations.Location(3, 64, 4), 5.0, "SW");
+        when(botOperations.getNearbyThreats(32)).thenReturn(List.of(threat));
+
+        AutonomousObserver obs = observerWithTaskExecutor(taskExecutor);
+        tickToScan(obs);
+
+        verify(eventQueue).publishFramework(anyString());
+    }
+
+    @Test
+    void opportunitiesPublishedRegardlessOfTask() {
+        // Task is RUNNING — opportunities (passive mobs) must still be published regardless.
+        // Note: taskExecutor.currentTask() is not stubbed here because suppressLowRiskThreats
+        // short-circuits when the threats list is empty, so it is never called.
+        when(botOperations.getNearbyThreats(32)).thenReturn(List.of());
+        var pig = EntityInfo.builder()
+                .type("Pig")
+                .location(new BotOperations.Location(5, 64, 5))
+                .distance(4.0)
+                .direction("N")
+                .build();
+        when(botOperations.getNearbyEntities("Pig", 16)).thenReturn(List.of(pig));
+        when(botOperations.getNearbyEntities("Cow", 16)).thenReturn(List.of());
+
+        AutonomousObserver obs = observerWithTaskExecutor(taskExecutor);
+        tickToScan(obs);
+
+        var captor = ArgumentCaptor.forClass(String.class);
+        verify(eventQueue).publishFramework(captor.capture());
+        assertThat(captor.getValue()).contains("Pig");
+    }
+
+    /** Builds a running TaskSnapshot with a minimal Plan for testing. */
+    private TaskSnapshot runningTaskSnapshot() {
+        Plan plan = new Plan(UUID.randomUUID(), "test plan", "player",
+                Instant.now(), List.of(),
+                new com.mcagent.core.task.TerminationPolicy(java.time.Duration.ofHours(3), true));
+        return new TaskSnapshot(plan.id(), plan, TaskState.RUNNING, 0, "",
+                Instant.now(), Optional.empty());
+    }
+
+    /**
+     * Builds a full-constructor {@link AutonomousObserver} with the given {@link TaskExecutor}
+     * and default shared test infrastructure (shared {@code eventQueue}, {@code botOperations},
+     * {@code config}).
+     */
+    private AutonomousObserver observerWithTaskExecutor(TaskExecutor executor) {
+        return new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                new com.mcagent.core.telemetry.Counters(),
+                null,
+                null,
+                () -> null,
+                null,
+                null,
+                null,
+                executor,
+                null);  // no inventoryOps
+    }
+
+    /**
+     * Like {@link #observerWithTaskExecutor} but uses a caller-supplied {@link
+     * com.mcagent.core.telemetry.Counters} so tests can assert on counter state.
+     */
+    private AutonomousObserver observerWithTaskExecutorAndCounters(
+            TaskExecutor executor, com.mcagent.core.telemetry.Counters counters) {
+        return new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                counters,
+                null,
+                null,
+                () -> null,
+                null,
+                null,
+                null,
+                executor,
+                null);  // no inventoryOps
+    }
+
+    private void tickToScan(AutonomousObserver obs) {
+        int interval = config.getScanIntervalTicks();
+        for (int i = 0; i < interval; i++) {
+            obs.onTick();
+        }
+    }
+
     private void tickToScan() {
         int interval = config.getScanIntervalTicks();
         for (int i = 0; i < interval; i++) {
             observer.onTick();
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Heartbeat emission tests (A3)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void heartbeat_emittedWhenTaskRunningAndConditionsMet() {
+        // Task started 2 minutes ago — past the grace period.
+        Instant startedAt = Instant.now().minus(Duration.ofMinutes(2));
+        TaskSnapshot snap = longRunningTaskSnapshot(startedAt);
+        when(taskExecutor.currentTask()).thenReturn(Optional.of(snap));
+
+        // Observer position / health for heartbeat formatting.
+        when(botOperations.getCurrentPosition()).thenReturn(new BotOperations.Location(0, -32, 0));
+        when(botOperations.getHealthStatus()).thenReturn(new HealthStatus(18f, 20f, 15, 0));
+        when(botOperations.getNearbyThreats(anyInt())).thenReturn(List.of());
+        when(botOperations.getNearbyEntities(anyString(), anyInt())).thenReturn(List.of());
+
+        BotProperties botProps = new BotProperties();
+        // Set very short grace/cooldown so the test fires immediately.
+        botProps.getJob().setHeartbeatGraceSeconds(0);
+        botProps.getJob().setHeartbeatCooldownSeconds(0);
+        botProps.getJob().setSuppressIfRecentChatSeconds(0);
+
+        com.mcagent.core.telemetry.JobTracker jobTracker = new com.mcagent.core.telemetry.JobTracker();
+        com.mcagent.core.telemetry.Counters counters = new com.mcagent.core.telemetry.Counters();
+
+        AutonomousObserver obs = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                jobTracker, counters, null, null,
+                () -> null, null, null, botProps, taskExecutor, inventoryOps);
+
+        tickToScan(obs);
+
+        // A heartbeat should have been enqueued on the outbound channel.
+        verify(eventQueue).enqueueOutbound(anyString());
+        assertThat(counters.get("heartbeat.sent")).isEqualTo(1);
+    }
+
+    @Test
+    void heartbeat_suppressedDuringPlayerInteraction() {
+        // Task started 2 minutes ago — past the grace period.
+        Instant startedAt = Instant.now().minus(Duration.ofMinutes(2));
+        TaskSnapshot snap = longRunningTaskSnapshot(startedAt);
+        when(taskExecutor.currentTask()).thenReturn(Optional.of(snap));
+
+        when(botOperations.getNearbyThreats(anyInt())).thenReturn(List.of());
+        when(botOperations.getNearbyEntities(anyString(), anyInt())).thenReturn(List.of());
+
+        BotProperties botProps = new BotProperties();
+        botProps.getJob().setHeartbeatGraceSeconds(0);
+        botProps.getJob().setHeartbeatCooldownSeconds(0);
+        // Suppress window is 60s — player just interacted.
+        botProps.getJob().setSuppressIfRecentChatSeconds(60);
+
+        com.mcagent.core.telemetry.JobTracker jobTracker = new com.mcagent.core.telemetry.JobTracker();
+        // Simulate a very recent player interaction.
+        jobTracker.markPlayerInteraction();
+        com.mcagent.core.telemetry.Counters counters = new com.mcagent.core.telemetry.Counters();
+
+        AutonomousObserver obs = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                jobTracker, counters, null, null,
+                () -> null, null, null, botProps, taskExecutor, inventoryOps);
+
+        tickToScan(obs);
+
+        // Heartbeat must be suppressed — no outbound message.
+        verify(eventQueue, never()).enqueueOutbound(anyString());
+        assertThat(counters.get("heartbeat.sent")).isEqualTo(0);
+    }
+
+    /**
+     * Builds a running {@link TaskSnapshot} with a given start time, using an empty step list.
+     * The plan summary is used as the step description fallback in {@code formatHeartbeat}.
+     */
+    private TaskSnapshot longRunningTaskSnapshot(Instant startedAt) {
+        Plan plan = new Plan(UUID.randomUUID(), "Mine iron ore", "player",
+                startedAt, List.of(),
+                new com.mcagent.core.task.TerminationPolicy(java.time.Duration.ofHours(3), true));
+        return new TaskSnapshot(plan.id(), plan, TaskState.RUNNING, 0, "47/200 IRON_ORE",
+                startedAt, Optional.empty());
     }
 }

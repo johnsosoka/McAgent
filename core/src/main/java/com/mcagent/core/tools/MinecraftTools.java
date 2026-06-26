@@ -11,29 +11,135 @@ import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.BotOperations.Location;
 import com.mcagent.core.service.ChatService;
+import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.service.PlanDraft;
+import com.mcagent.core.service.PlanFromDraftConverter;
+import com.mcagent.core.service.PlanValidationException;
+import com.mcagent.core.service.Planner;
 import com.mcagent.core.service.SafetyValidator;
+import com.mcagent.core.task.PendingApprovalStore;
+import com.mcagent.core.task.Plan;
+import com.mcagent.core.task.PlanApprovalGate;
+import com.mcagent.core.task.PlanSerializer;
+import com.mcagent.core.task.RetryPolicy;
+import com.mcagent.core.task.Step;
+import com.mcagent.core.task.TaskExecutor;
+import com.mcagent.core.task.TaskSnapshot;
+import com.mcagent.core.task.TerminationPolicy;
+import com.mcagent.core.task.postcondition.InventoryDecreased;
+import com.mcagent.core.task.postcondition.InventoryIncreased;
+import com.mcagent.core.task.postcondition.NoOp;
+import com.mcagent.core.task.postcondition.PostCondition;
+import com.mcagent.core.task.postcondition.PostConditionChecker;
+import com.mcagent.core.task.postcondition.PositionWithin;
+import com.mcagent.core.task.postcondition.WorldStateSnapshot;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
  * Tools exposed to the LLM for Minecraft interactions.
  * These methods are discovered by LangChain4j and presented to the model.
+ *
+ * <h3>Post-condition self-verification (Sprint 13 A5)</h3>
+ * <p>Each meaningful tool records a post-condition before execution and verifies it
+ * after. The result is emitted via {@link LangChain4jService#addFrameworkContext}
+ * so both the LLM and {@link com.mcagent.core.task.JobSupervisor} can observe whether
+ * the expected world-state change occurred. {@link NoOp} post-conditions are silently
+ * skipped to avoid framework-message noise.</p>
+ *
+ * <p>The static registry {@link #POST_CONDITIONS} maps each tool name to a factory
+ * that builds a {@link PostCondition} from the raw tool arguments. External callers
+ * (e.g. {@code JobSupervisor}) may query it via {@link #postConditionFor(String, Object...)}.</p>
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class MinecraftTools {
+
+    // -------------------------------------------------------------------------
+    // Post-condition registry (Sprint 13 A5)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Pairs a {@link PostCondition} with a flag indicating whether the tool is synchronous.
+     *
+     * <p>Synchronous tools complete their world-state change before returning, so the
+     * post-condition can be evaluated immediately. Async tools (Baritone-backed) dispatch
+     * work in the background — capturing an "after" snapshot immediately after the tool
+     * returns would always observe an unchanged world and produce false negatives.</p>
+     */
+    private record ToolPC(PostCondition pc, boolean sync) {}
+
+    /**
+     * Maps tool name → a factory that produces a {@link ToolPC} from the raw tool
+     * arguments in declaration order.
+     *
+     * <p>Async tools are registered with {@code sync=false} so the post-condition
+     * framework message is emitted as "verification pending" rather than an immediate
+     * (and incorrect) delta check.</p>
+     *
+     * <p>Argument ordering mirrors the corresponding {@code @Tool} method signature.
+     * Entries not listed here default to {@link NoOp} via {@link #postConditionFor}.</p>
+     */
+    private static final Map<String, Function<Object[], ToolPC>> POST_CONDITIONS =
+            Map.ofEntries(
+                // Synchronous tools — world state changes before method returns.
+                Map.entry("placeBlockAt",
+                        args -> new ToolPC(new InventoryDecreased((String) args[3], 1), true)),
+                Map.entry("eatFood",
+                        args -> new ToolPC(new NoOp(), true)),
+                Map.entry("placeTorchAtFeet",
+                        args -> new ToolPC(new InventoryDecreased("minecraft:torch", 1), true)),
+                // Async tools — Baritone runs in the background; snapshot after return is stale.
+                Map.entry("mineResource",
+                        args -> new ToolPC(new InventoryIncreased((String) args[0], (Integer) args[1]), false)),
+                Map.entry("navigateTo",
+                        args -> new ToolPC(new PositionWithin((Integer) args[0], (Integer) args[1], (Integer) args[2], 3), false)),
+                Map.entry("buildArea",
+                        args -> {
+                            int volume = Math.abs(((Integer) args[3]) - ((Integer) args[0]) + 1)
+                                       * Math.abs(((Integer) args[4]) - ((Integer) args[1]) + 1)
+                                       * Math.abs(((Integer) args[5]) - ((Integer) args[2]) + 1);
+                            return new ToolPC(new InventoryDecreased((String) args[6], volume), false);
+                        })
+            );
+
+    /**
+     * Tool names that are async (Baritone-backed). Used by {@link #withToolScope} to
+     * determine whether to capture an "after" snapshot or emit a "pending" notice.
+     */
+    private static final java.util.Set<String> ASYNC_TOOLS = Set.of(
+            "mineResource", "navigateTo", "buildArea"
+    );
+
+    /**
+     * Look up the expected post-condition for a tool by name.
+     * Returns {@link Optional#empty()} when no entry is registered (callers may
+     * treat absence as a {@link NoOp}).
+     *
+     * @param toolName the name matching a {@code @Tool} method name
+     * @param args     tool arguments in declaration order
+     */
+    public static Optional<PostCondition> postConditionFor(String toolName, Object... args) {
+        Function<Object[], ToolPC> fn = POST_CONDITIONS.get(toolName);
+        return Optional.ofNullable(fn).map(f -> f.apply(args).pc());
+    }
 
     private final BotOperations bot;
     private final LocationMemoryService locationMemory;
@@ -44,6 +150,18 @@ public class MinecraftTools {
     private final JobTracker jobTracker;
     private final Counters counters;
     private final RunLog runLog;
+    private final TaskExecutor taskExecutor;
+    private final Planner planner;
+    private final PlanApprovalGate approvalGate;
+    private final PendingApprovalStore pendingApprovalStore;
+
+    /**
+     * Injected lazily to break the {@code MinecraftTools → LangChain4jService → Assistant → MinecraftTools}
+     * circular dependency. Spring resolves lazy references via a proxy, so this field is safe to use
+     * after construction.
+     */
+    @Setter(onMethod_ = {@Autowired, @Lazy})
+    private LangChain4jService langChain4jService;
 
     @Tool("Follow a specific player by name. The bot will path to and continue following them.")
     public String followPlayer(
@@ -66,7 +184,7 @@ public class MinecraftTools {
             @P("Y coordinate") int y,
             @P("Z coordinate") int z) {
         log.info("Tool: navigateTo({}, {}, {})", x, y, z);
-        return withToolScope("navigateTo", () -> {
+        return withToolScope("navigateTo", new PositionWithin(x, y, z, 3), () -> {
             jobTracker.setCurrentJob("Navigating to (" + x + ", " + y + ", " + z + ")", "unknown");
             var result = bot.navigateTo(x, y, z);
             if (result.isSuccess()) {
@@ -101,7 +219,7 @@ public class MinecraftTools {
             @P("Maximum number of blocks to mine") int maxBlocks,
             @P("Optional search radius in blocks (default 64)") Integer radius) {
         log.info("Tool: mineResource({}, {}, {})", blockType, maxBlocks, radius);
-        return withToolScope("mineResource", () -> {
+        return withToolScope("mineResource", new InventoryIncreased(blockType, maxBlocks), () -> {
             jobTracker.setCurrentJob("Mining " + blockType + " (up to " + maxBlocks + ")", "unknown");
             int currentY = bot.getCurrentPosition().y();
             // TODO Sprint 13: pass targetY when MineStep exposes it
@@ -500,7 +618,7 @@ public class MinecraftTools {
             @P("Corner 2 Z") int z2,
             @P("Block type, e.g. minecraft:oak_planks") String blockType) {
         log.info("Tool: buildArea({}, {}, {}, {}, {}, {}, {})", x1, y1, z1, x2, y2, z2, blockType);
-        return withToolScope("buildArea", () -> {
+        return withToolScope("buildArea", new InventoryDecreased(blockType, 1), () -> {
             jobTracker.setCurrentJob("Building " + blockType + " area", "unknown");
             int currentY = bot.getCurrentPosition().y();
             BotAction safetyAction = BotAction.builder()
@@ -557,7 +675,7 @@ public class MinecraftTools {
     @Tool("Place a torch at the bot's current location if there is a suitable adjacent surface and a torch is in inventory.")
     public String placeTorchAtFeet() {
         log.info("Tool: placeTorchAtFeet");
-        return withToolScope("placeTorchAtFeet", () -> {
+        return withToolScope("placeTorchAtFeet", new InventoryDecreased("minecraft:torch", 1), () -> {
             if (!bot.hasItem("minecraft:torch", 1)) {
                 return "No torch in inventory.";
             }
@@ -603,7 +721,171 @@ public class MinecraftTools {
     }
 
     // -------------------------------------------------------------------------
-    // Instrumentation helper
+    // Plan submission (Sprint 13 C1)
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+            Submit a structured multi-step Plan for the bot to execute. Use this for tasks requiring
+            more than one tool call or that should run for an extended time. The Plan is a sequence
+            of typed Steps (NavigateStep, MineStep, WaitForStep).
+            Single-step tasks ("come here", "what is in your inventory") should NOT use submitPlan.
+            """)
+    public String submitPlan(
+            @P("Brief description of what this plan does") String summary,
+            @P("""
+               JSON array of steps. Each step has a "type" field (Navigate, Mine, or WaitFor)
+               plus step-specific args and optional "timeout" (ISO-8601, e.g. "PT10M") and
+               "retry" ({\"maxRetries\":1,\"backoff\":\"PT2S\"}).
+               Navigate: {"type":"Navigate","x":100,"y":64,"z":200}
+               Mine: {"type":"Mine","blockType":"minecraft:iron_ore","quantity":16,"searchRadius":32}
+               WaitFor: {"type":"WaitFor","condition":{"type":"InventoryHas","itemId":"minecraft:iron_ore","count":16},"timeout":"PT5M"}
+               """) String stepsJson
+    ) {
+        log.info("Tool: submitPlan(summary={}, steps={})", summary, stepsJson);
+        return withToolScope("submitPlan", () -> {
+            List<Step> steps;
+            try {
+                steps = PlanSerializer.stepsFromJson(stepsJson);
+            } catch (IllegalArgumentException e) {
+                return "Invalid steps JSON: " + e.getMessage();
+            }
+
+            if (steps.isEmpty()) {
+                return "Cannot submit an empty plan.";
+            }
+
+            Plan plan = new Plan(
+                    UUID.randomUUID(),
+                    summary,
+                    "player",               // Q3 (approval gate) will wire actual player name — deferred
+                    Instant.now(),
+                    steps,
+                    TerminationPolicy.DEFAULT);
+
+            try {
+                var snapshot = taskExecutor.submit(plan);
+                chatService.send("Plan submitted: " + summary + " (" + steps.size() + " steps)");
+                return "Plan submitted (id=" + snapshot.id() + "): " + summary + " — " + steps.size() + " steps";
+            } catch (IllegalStateException e) {
+                return "Cannot submit plan — another plan is already running. Cancel it first with cancelCurrentOperation().";
+            }
+        });
+    }
+
+    @Tool("Get the current status of the active plan, if any.")
+    public String getPlanStatus() {
+        log.info("Tool: getPlanStatus");
+        return withToolScope("getPlanStatus", () -> {
+            var snap = taskExecutor.currentTask();
+            if (snap.isEmpty()) {
+                return "No active plan.";
+            }
+            var s = snap.get();
+            Plan plan = s.plan();
+            int total = plan.steps().size();
+            int step = s.currentStepIndex() + 1;
+            String progress = s.stepProgress() != null && !s.stepProgress().isEmpty()
+                    ? " | " + s.stepProgress() : "";
+            return String.format("Plan: %s | Step %d/%d: %s | State: %s%s",
+                    plan.summary(), step, total,
+                    plan.steps().get(s.currentStepIndex()).description(),
+                    s.state(), progress);
+        });
+    }
+
+    @Tool("Cancel the currently running plan.")
+    public String cancelPlan() {
+        log.info("Tool: cancelPlan");
+        return withToolScope("cancelPlan", () -> {
+            var snap = taskExecutor.currentTask();
+            if (snap.isEmpty()) {
+                return "No active plan to cancel.";
+            }
+            boolean cancelled = taskExecutor.cancel(snap.get().id());
+            if (cancelled) {
+                chatService.send("Plan cancelled: " + snap.get().plan().summary());
+                return "Plan cancelled: " + snap.get().plan().summary();
+            }
+            return "Could not cancel plan — it may have already finished.";
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Planner integration (Sprint 13 A2)
+    // -------------------------------------------------------------------------
+
+    @Tool("""
+            Decompose a multi-step player request into a Plan and execute it.
+            Use this for complex requests requiring multiple actions in sequence.
+            The Plan is built by the planner role and submitted to the task executor.
+            Single-step actions (come here, what is my position) should NOT use this — call the specific tool directly.
+            """)
+    public String decomposeAndExecute(
+            @P("The player's request in their original words. Example: 'mine 64 iron ore'.") String playerRequest) {
+        log.info("Tool: decomposeAndExecute({})", playerRequest);
+        return withToolScope("decomposeAndExecute", new NoOp(), () -> {
+            try {
+                PlanDraft draft;
+                try {
+                    draft = planner.propose(playerRequest);
+                } catch (RuntimeException e) {
+                    log.warn("Planner LLM call failed, attempting one retry: {}", e.getMessage());
+                    try {
+                        draft = planner.propose(playerRequest);
+                    } catch (RuntimeException e2) {
+                        return "Planner failed to produce a valid plan. Try rephrasing or use individual tools.";
+                    }
+                }
+                Plan plan = PlanFromDraftConverter.convert(draft, "player");
+
+                if (approvalGate.requiresApproval(plan)) {
+                    String prefix = pendingApprovalStore.peek().isPresent()
+                            ? "Replacing previous pending plan. "
+                            : "";
+                    pendingApprovalStore.set(plan);
+                    String preview = prefix + formatPlanPreview(plan);
+                    chatService.send(preview);
+                    log.info("Plan held for approval: {} ({} steps)", plan.summary(), plan.steps().size());
+                    return preview;
+                }
+
+                TaskSnapshot snapshot = taskExecutor.submit(plan);
+                chatService.send("Plan submitted: " + plan.summary() + " (" + plan.steps().size() + " steps)");
+                return "Plan submitted (id=" + snapshot.id() + "): " + plan.summary()
+                        + " — " + plan.steps().size() + " steps";
+            } catch (PlanValidationException e) {
+                log.warn("Plan rejected for request '{}': {}", playerRequest, e.getMessage());
+                return "Plan rejected: " + e.getMessage();
+            }
+        });
+    }
+
+    /**
+     * Build a compact plan preview string for the player.
+     *
+     * <p>Lists each step with a 1-based index, the total estimated wall-clock time,
+     * and a prompt to start with {@code agent go}. The result is truncated to 240
+     * characters to fit within Minecraft's signed-chat payload limit.</p>
+     *
+     * @param plan the plan awaiting approval
+     * @return a human-readable preview string, at most 240 characters
+     */
+    String formatPlanPreview(Plan plan) {
+        StringBuilder sb = new StringBuilder("Plan: ").append(plan.summary()).append("\n");
+        for (int i = 0; i < plan.steps().size(); i++) {
+            sb.append("  ").append(i + 1).append(". ")
+              .append(plan.steps().get(i).description()).append("\n");
+        }
+        long estSec = plan.steps().stream()
+                .mapToLong(s -> s.timeout() != null ? s.timeout().getSeconds() : 0L)
+                .sum();
+        sb.append("Est. time: ~").append(estSec / 60).append("m. Reply 'agent go' to start.");
+        String full = sb.toString();
+        return full.length() > 240 ? full.substring(0, 240) : full;
+    }
+
+    // -------------------------------------------------------------------------
+    // Instrumentation helpers
     // -------------------------------------------------------------------------
 
     /**
@@ -615,14 +897,42 @@ public class MinecraftTools {
      * still the first thing that happens after the MDC scope opens.</p>
      */
     private <T> T withToolScope(String toolName, Supplier<T> action) {
+        return withToolScope(toolName, new NoOp(), action);
+    }
+
+    /**
+     * Post-condition variant of {@link #withToolScope(String, Supplier)}.
+     *
+     * <p>For synchronous tools (see {@link #ASYNC_TOOLS}), captures before/after snapshots
+     * and emits an immediate {@code <framework>} message describing the observed delta.
+     * For async tools (Baritone-backed {@code mineResource}, {@code navigateTo},
+     * {@code buildArea}), the world state has not changed by the time the tool returns —
+     * only an "expected: ... (async, verification pending)" notice is emitted so the LLM is
+     * not told an incorrect observed count. {@link NoOp} post-conditions are silently skipped.</p>
+     *
+     * @param toolName tool name for logging and counter keys
+     * @param pc       expected post-condition; use {@link NoOp} to opt out of checking
+     * @param action   the tool body to execute
+     */
+    private <T> T withToolScope(String toolName, PostCondition pc, Supplier<T> action) {
+        boolean isAsync = !(pc instanceof NoOp) && ASYNC_TOOLS.contains(toolName);
+
         try (MDC.MDCCloseable ignored = MDC.putCloseable("tool", toolName)) {
             counters.inc("tool." + toolName + ".calls");
             long start = System.currentTimeMillis();
             try {
+                WorldStateSnapshot before = (pc instanceof NoOp || isAsync) ? null : captureSnapshot(pc);
                 T result = action.get();
                 long durationMs = System.currentTimeMillis() - start;
                 counters.inc("tool." + toolName + ".success");
                 runLog.log("tool_call", Map.of("tool", toolName, "duration_ms", durationMs));
+                if (!(pc instanceof NoOp)) {
+                    if (isAsync) {
+                        emitAsyncPostConditionNotice(toolName, pc);
+                    } else {
+                        emitPostConditionResult(toolName, pc, before);
+                    }
+                }
                 return result;
             } catch (RuntimeException e) {
                 long durationMs = System.currentTimeMillis() - start;
@@ -636,6 +946,95 @@ public class MinecraftTools {
         }
     }
 
+    /**
+     * Capture the world state attributes relevant to evaluating {@code pc}.
+     * For inventory post-conditions the relevant item ID is queried; for position
+     * post-conditions only the position is captured; for {@link NoOp} this must
+     * not be called.
+     */
+    private WorldStateSnapshot captureSnapshot(PostCondition pc) {
+        BotOperations.Location pos = bot.getCurrentPosition();
+        Map<String, Integer> counts = switch (pc) {
+            case InventoryIncreased(var id, var ignored) -> Map.of(id, bot.countItem(id));
+            case InventoryDecreased(var id, var ignored) -> Map.of(id, bot.countItem(id));
+            case PositionWithin ignored -> Map.of();
+            case NoOp ignored -> Map.of();
+        };
+        return new WorldStateSnapshot(pos, counts);
+    }
+
+    /**
+     * Emit a "verification pending" notice for async tools.
+     *
+     * <p>Called when the tool dispatches work to Baritone asynchronously. The world state
+     * will not reflect the expected change until Baritone finishes — capturing an "after"
+     * snapshot now would always show observed=0 and report a false failure.</p>
+     */
+    private void emitAsyncPostConditionNotice(String toolName, PostCondition pc) {
+        try {
+            String message = "tool:" + toolName + " done. expected: " + pc.describe()
+                    + " (async, verification pending).";
+            langChain4jService.addFrameworkContext(message);
+        } catch (Exception e) {
+            log.warn("Failed to emit async post-condition notice for tool '{}': {}", toolName, e.getMessage());
+        }
+    }
+
+    /**
+     * Capture a post-execution snapshot and emit a {@code <framework>} message
+     * describing whether the post-condition was satisfied.
+     */
+    private void emitPostConditionResult(String toolName, PostCondition pc, WorldStateSnapshot before) {
+        try {
+            WorldStateSnapshot after = captureSnapshot(pc);
+            boolean satisfied = PostConditionChecker.check(pc, before, after);
+            String message = buildFrameworkMessage(toolName, pc, before, after, satisfied);
+            langChain4jService.addFrameworkContext(message);
+        } catch (Exception e) {
+            log.warn("Post-condition check failed for tool '{}': {}", toolName, e.getMessage());
+        }
+    }
+
+    /**
+     * Build the human-readable framework message for the post-condition result.
+     *
+     * <p>Format examples:
+     * <pre>
+     *   tool:mineResource done. expected: +4 minecraft:iron_ore. observed: +4.
+     *   tool:mineResource done. expected: +4 minecraft:iron_ore. observed: +3 (1 short).
+     *   tool:navigateTo done. expected: position within 3 of (100,64,200). observed: satisfied.
+     *   tool:placeBlockAt done. expected: -1 minecraft:torch. observed: -1.
+     * </pre>
+     */
+    private String buildFrameworkMessage(String toolName, PostCondition pc,
+                                          WorldStateSnapshot before, WorldStateSnapshot after,
+                                          boolean satisfied) {
+        String prefix = "tool:" + toolName + " done. expected: " + pc.describe() + ". observed: ";
+        return switch (pc) {
+            case InventoryIncreased(var id, var n) -> {
+                int delta = after.inventoryCounts().getOrDefault(id, 0)
+                        - before.inventoryCounts().getOrDefault(id, 0);
+                if (satisfied) {
+                    yield prefix + "+" + delta + ".";
+                }
+                int shortage = n - delta;
+                yield prefix + "+" + delta + " (" + shortage + " short).";
+            }
+            case InventoryDecreased(var id, var n) -> {
+                int delta = before.inventoryCounts().getOrDefault(id, 0)
+                        - after.inventoryCounts().getOrDefault(id, 0);
+                if (satisfied) {
+                    yield prefix + "-" + delta + ".";
+                }
+                int shortage = n - delta;
+                yield prefix + "-" + delta + " (" + shortage + " short).";
+            }
+            case PositionWithin ignored ->
+                    prefix + (satisfied ? "satisfied." : "not satisfied.");
+            case NoOp ignored -> prefix + "done.";
+        };
+    }
+
     @Tool("Place a single block at specific coordinates. The bot must have the block in inventory.")
     public String placeBlockAt(
             @P("X coordinate") int x,
@@ -643,7 +1042,7 @@ public class MinecraftTools {
             @P("Z coordinate") int z,
             @P("Block type, e.g. minecraft:torch") String blockType) {
         log.info("Tool: placeBlockAt({}, {}, {}, {})", x, y, z, blockType);
-        return withToolScope("placeBlockAt", () -> {
+        return withToolScope("placeBlockAt", new InventoryDecreased(blockType, 1), () -> {
             jobTracker.setCurrentJob("Placing " + blockType + " at (" + x + ", " + y + ", " + z + ")", "unknown");
             int currentY = bot.getCurrentPosition().y();
             BotAction safetyAction = BotAction.builder()

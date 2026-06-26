@@ -13,6 +13,11 @@ import com.mcagent.core.memory.VectorMemoryService;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.core.service.SafetyValidator;
+import com.mcagent.core.task.DefaultTaskExecutor;
+import com.mcagent.core.task.JobSupervisor;
+import com.mcagent.core.task.PendingApprovalStore;
+import com.mcagent.core.task.PlanApprovalGate;
+import com.mcagent.core.task.SessionResumer;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
@@ -46,7 +51,12 @@ import org.springframework.context.annotation.Import;
         SurvivalReflexes.class,
         LocationMemoryService.class,
         PlayerNoteService.class,
-        VectorMemoryService.class
+        VectorMemoryService.class,
+        JobSupervisor.class,
+        DefaultTaskExecutor.class,
+        SessionResumer.class,
+        PendingApprovalStore.class,
+        PlanApprovalGate.class
 })
 public class CoreApplication {
     // Intentionally empty — @Import defines the context

@@ -1,8 +1,13 @@
 package com.mcagent.fabric;
 
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.core.task.PendingApprovalStore;
+import com.mcagent.core.task.Plan;
+import com.mcagent.core.task.TaskExecutor;
+import com.mcagent.core.task.TaskSnapshot;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
+import com.mcagent.core.telemetry.RunLog;
 import com.mcagent.fabric.observer.AutonomousObserver;
 import com.mcagent.fabric.queue.BotEventQueue;
 import com.mcagent.fabric.queue.EventPriority;
@@ -40,6 +45,9 @@ public class FabricChatHandler {
     private final BotOperations bot;
     private final JobTracker jobTracker;
     private final Counters counters;
+    private final RunLog runLog;
+    private final TaskExecutor taskExecutor;
+    private final PendingApprovalStore pendingApprovalStore;
     // Injectable for tests — defaults to the real static sender.
     final Consumer<String> chatSender;
 
@@ -48,8 +56,12 @@ public class FabricChatHandler {
             AutonomousObserver autonomousObserver,
             BotOperations bot,
             JobTracker jobTracker,
-            Counters counters) {
-        this(botEventQueue, autonomousObserver, bot, jobTracker, counters, FabricChatSender::send);
+            Counters counters,
+            RunLog runLog,
+            TaskExecutor taskExecutor,
+            PendingApprovalStore pendingApprovalStore) {
+        this(botEventQueue, autonomousObserver, bot, jobTracker, counters, runLog,
+                taskExecutor, pendingApprovalStore, FabricChatSender::send);
     }
 
     /**
@@ -62,12 +74,18 @@ public class FabricChatHandler {
             BotOperations bot,
             JobTracker jobTracker,
             Counters counters,
+            RunLog runLog,
+            TaskExecutor taskExecutor,
+            PendingApprovalStore pendingApprovalStore,
             Consumer<String> chatSender) {
         this.botEventQueue = botEventQueue;
         this.autonomousObserver = autonomousObserver;
         this.bot = bot;
         this.jobTracker = jobTracker;
         this.counters = counters;
+        this.runLog = runLog;
+        this.taskExecutor = taskExecutor;
+        this.pendingApprovalStore = pendingApprovalStore;
         this.chatSender = chatSender;
     }
 
@@ -102,6 +120,9 @@ public class FabricChatHandler {
             return;
         }
 
+        // Any message that reaches the LLM is a player interaction — reset heartbeat suppression.
+        jobTracker.markPlayerInteraction();
+
         EventPriority priority = resolvePriority(command);
         botEventQueue.enqueueCommand(playerName, command, priority);
     }
@@ -130,16 +151,43 @@ public class FabricChatHandler {
         // --- Hard-stop bypass ---
         if (lower.equals("stop") || lower.equals("cancel")
                 || lower.equals("halt") || lower.equals("abort")) {
+            jobTracker.markPlayerInteraction();
             bot.cancel();
             botEventQueue.clearInbound();
             jobTracker.clearJob();
+            pendingApprovalStore.clear();
             chatSender.accept("Stopped.");
-            log.info("Hard-stop executed: Baritone cancelled, inbound queue cleared");
+            log.info("Hard-stop executed: Baritone cancelled, inbound queue cleared, pending plan discarded");
+            return true;
+        }
+
+        // --- Plan approval bypass (agent go / agent approved) ---
+        if (lower.equals("go") || lower.equals("approved") || lower.startsWith("go ")) {
+            jobTracker.markPlayerInteraction();
+            Optional<Plan> pending = pendingApprovalStore.getAndClear();
+            if (pending.isEmpty()) {
+                chatSender.accept("No plan pending approval.");
+                return true;
+            }
+            Plan plan = pending.get();
+            try {
+                TaskSnapshot snapshot = taskExecutor.submit(plan);
+                chatSender.accept("Plan started: " + plan.summary() + ".");
+                counters.inc("plan.approved");
+                runLog.log("plan_approved", Map.of(
+                        "task_id", snapshot.id().toString(),
+                        "summary", plan.summary()));
+                log.info("Plan approved and started: {} (id={})", plan.summary(), snapshot.id());
+            } catch (Exception e) {
+                chatSender.accept("Failed to start plan: " + e.getMessage());
+                log.warn("Failed to start approved plan '{}': {}", plan.summary(), e.getMessage());
+            }
             return true;
         }
 
         // --- Status bypass ---
         if (lower.equals("status") || lower.equals("what are you doing")) {
+            jobTracker.markPlayerInteraction();
             String status = buildStatusString();
             chatSender.accept(status);
             return true;
@@ -147,27 +195,32 @@ public class FabricChatHandler {
 
         // --- Stats bypass (counter snapshot) ---
         if (lower.equals("stats")) {
+            jobTracker.markPlayerInteraction();
             chatSender.accept(buildStatsString());
             return true;
         }
 
         // --- Observer toggles ---
         if (lower.equals("watch") || lower.equals("start watching") || lower.equals("observe")) {
+            jobTracker.markPlayerInteraction();
             autonomousObserver.setEnabled(true);
             chatSender.accept("Observation enabled.");
             return true;
         }
         if (lower.equals("stop watching") || lower.equals("stop observing") || lower.equals("disable observation")) {
+            jobTracker.markPlayerInteraction();
             autonomousObserver.setEnabled(false);
             chatSender.accept("Observation disabled.");
             return true;
         }
         if (lower.equals("passive mode") || lower.equals("set passive")) {
+            jobTracker.markPlayerInteraction();
             autonomousObserver.setMode("passive");
             chatSender.accept("Observation mode set to passive.");
             return true;
         }
         if (lower.equals("active mode") || lower.equals("set active")) {
+            jobTracker.markPlayerInteraction();
             autonomousObserver.setMode("active");
             chatSender.accept("Observation mode set to active. I'll act on threats automatically.");
             return true;
