@@ -1,5 +1,6 @@
 package com.mcagent.fabric;
 
+import com.mcagent.core.observer.BotMode;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.task.NavigateStep;
 import com.mcagent.core.task.PendingApprovalStore;
@@ -137,8 +138,7 @@ class FabricChatHandlerTest {
 
     @Test
     void status_doesNotCancelBot_sendsStatusString_returnsTrue() {
-        when(autonomousObserver.getMode()).thenReturn("passive");
-        when(autonomousObserver.isEnabled()).thenReturn(true);
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.WATCH);
         when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
         when(jobTracker.getLastProgress()).thenReturn("");
 
@@ -158,8 +158,7 @@ class FabricChatHandlerTest {
 
     @Test
     void status_withActiveJob_includesJobDescriptionAndElapsed() {
-        when(autonomousObserver.getMode()).thenReturn("active");
-        when(autonomousObserver.isEnabled()).thenReturn(true);
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.AUTO);
         JobTracker.Job job = new JobTracker.Job("Mining IRON_ORE", java.time.Instant.now(), "Alice");
         when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.of(job));
         when(jobTracker.elapsedFormatted()).thenReturn("5s");
@@ -178,8 +177,7 @@ class FabricChatHandlerTest {
     void status_noJob_reportsIdleWithoutThrowing() {
         // Exercises the TOCTOU-safe path: getCurrentJob() returns empty,
         // so the map shortcircuits and "idle" is used without a second call.
-        when(autonomousObserver.getMode()).thenReturn("passive");
-        when(autonomousObserver.isEnabled()).thenReturn(false);
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.STANDBY);
         when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
         when(jobTracker.getLastProgress()).thenReturn("");
 
@@ -193,8 +191,7 @@ class FabricChatHandlerTest {
 
     @Test
     void whatAreYouDoing_handledAsStatusBypass_returnsTrue() {
-        when(autonomousObserver.getMode()).thenReturn("active");
-        when(autonomousObserver.isEnabled()).thenReturn(true);
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.AUTO);
         when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
         when(jobTracker.getLastProgress()).thenReturn("");
 
@@ -234,32 +231,86 @@ class FabricChatHandlerTest {
 
     // --- Observer toggles remain bypass ---
 
+    // --- Canonical 3-mode commands ---
+
     @Test
-    void watch_enablesObservation_returnsTrue() {
-        boolean consumed = handler.handleToggleCommand("watch");
+    void standby_setsModeStandby_sendsAck_returnsTrue() {
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.STANDBY);
+        when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
+        when(jobTracker.getLastProgress()).thenReturn("");
+
+        boolean consumed = handler.handleToggleCommand("standby");
 
         assertThat(consumed).isTrue();
-        verify(autonomousObserver).setEnabled(true);
+        verify(autonomousObserver).setBotMode(BotMode.STANDBY);
         verify(botEventQueue, never()).enqueueCommand(
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any());
+        assertThat(sentMessages).hasSize(1);
+        assertThat(sentMessages.get(0)).contains("Mode:").contains("STANDBY");
     }
 
     @Test
-    void activeMode_setsObserverMode_returnsTrue() {
+    void watch_setsModeWatch_sendsAck_returnsTrue() {
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.WATCH);
+        when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
+        when(jobTracker.getLastProgress()).thenReturn("");
+
+        boolean consumed = handler.handleToggleCommand("watch");
+
+        assertThat(consumed).isTrue();
+        verify(autonomousObserver).setBotMode(BotMode.WATCH);
+        verify(botEventQueue, never()).enqueueCommand(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any());
+        assertThat(sentMessages).hasSize(1);
+        assertThat(sentMessages.get(0)).contains("Mode:").contains("WATCH");
+    }
+
+    @Test
+    void auto_setsModeAuto_sendsAck_returnsTrue() {
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.AUTO);
+        when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
+        when(jobTracker.getLastProgress()).thenReturn("");
+
+        boolean consumed = handler.handleToggleCommand("auto");
+
+        assertThat(consumed).isTrue();
+        verify(autonomousObserver).setBotMode(BotMode.AUTO);
+        verify(botEventQueue, never()).enqueueCommand(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any());
+        assertThat(sentMessages).hasSize(1);
+        assertThat(sentMessages.get(0)).contains("Mode:").contains("AUTO");
+    }
+
+    // --- Legacy observer aliases (deprecated but still functional) ---
+
+    @Test
+    void activeMode_mapsToAuto_sendsAck_returnsTrue() {
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.AUTO);
+        when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
+        when(jobTracker.getLastProgress()).thenReturn("");
+
         boolean consumed = handler.handleToggleCommand("active mode");
 
         assertThat(consumed).isTrue();
-        verify(autonomousObserver).setMode("active");
+        verify(autonomousObserver).setBotMode(BotMode.AUTO);
     }
 
     @Test
-    void passiveMode_setsObserverMode_returnsTrue() {
+    void passiveMode_mapsToWatch_sendsAck_returnsTrue() {
+        when(autonomousObserver.getBotMode()).thenReturn(BotMode.WATCH);
+        when(jobTracker.getCurrentJob()).thenReturn(java.util.Optional.empty());
+        when(jobTracker.getLastProgress()).thenReturn("");
+
         boolean consumed = handler.handleToggleCommand("passive mode");
 
         assertThat(consumed).isTrue();
-        verify(autonomousObserver).setMode("passive");
+        verify(autonomousObserver).setBotMode(BotMode.WATCH);
     }
 
     // --- Stats bypass ---

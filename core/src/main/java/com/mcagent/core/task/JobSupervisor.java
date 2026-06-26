@@ -1,7 +1,11 @@
 package com.mcagent.core.task;
 
+import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.core.service.FailureDecision;
 import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.service.PlanDraft;
+import com.mcagent.core.service.PlanFromDraftConverter;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
@@ -13,6 +17,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -61,6 +66,7 @@ public class JobSupervisor {
     private final JobTracker jobTracker;
     private final Counters counters;
     private final RunLog runLog;
+    private final BotProperties botProperties;
 
     private ExecutorService executor;
     private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
@@ -129,18 +135,24 @@ public class JobSupervisor {
     // -------------------------------------------------------------------------
 
     private void runPlan(TaskSnapshot initial, BotOperations bot, Consumer<TaskSnapshot> onUpdate) {
+        // Use a mutable list so REVISE can replace remaining steps mid-run.
         Plan plan = initial.plan();
-        List<Step> steps = plan.steps();
-        int stepCount = steps.size();
+        List<Step> steps = new ArrayList<>(plan.steps());
         Instant planStart = initial.startedAt();
 
         // Mutable state tracked inside the supervisor thread only.
         AtomicReference<TaskSnapshot> current = new AtomicReference<>(initial);
 
-        log.info("JobSupervisor: starting plan '{}' ({} steps)", plan.summary(), stepCount);
+        // Number of LLM escalation calls made during this plan run.
+        // Capped at bot.plan.max-escalations-per-plan to prevent thrash.
+        int escalationCount = 0;
+        int maxEscalations = botProperties.getPlan().getMaxEscalationsPerPlan();
+
+        log.info("JobSupervisor: starting plan '{}' ({} steps, cap={})",
+                plan.summary(), steps.size(), maxEscalations);
 
         try {
-            for (int i = initial.currentStepIndex(); i < stepCount; i++) {
+            for (int i = initial.currentStepIndex(); i < steps.size(); i++) {
 
                 // Check cancellation between steps.
                 if (cancelRequested.get()) {
@@ -169,6 +181,7 @@ public class JobSupervisor {
                 }
 
                 Step step = steps.get(i);
+                int stepCount = steps.size();
                 log.info("JobSupervisor: step {}/{} — {}", i + 1, stepCount, step.description());
 
                 // Update snapshot to show which step is starting.
@@ -197,21 +210,31 @@ public class JobSupervisor {
                 if (!result.succeeded()) {
                     String reason = result.failureReason();
                     log.warn("JobSupervisor: step {} failed — {}", i, reason);
-                    TaskSnapshot failed = withFailure(current.get(), i, reason);
-                    current.set(failed);
-                    onUpdate.accept(failed);
-                    counters.inc("plan.failed");
-                    runLog.log("plan_failed", Map.of(
-                            "planId", plan.id().toString(),
-                            "step", i,
-                            "reason", reason));
-                    publishFramework("[task:" + plan.summary() + "][step " + (i + 1) + "/" + stepCount + "] FAILED: " + reason);
-                    // Failure escalation (structured ping to LLM) — Sprint 13 v1: inject framework message.
-                    // Full DEPS-style explain-then-replan is deferred to Sprint 14 Q1.
-                    langChainService.addFrameworkContext(
-                            "Plan step failed. Task: " + plan.summary() +
-                            ". Step " + (i + 1) + "/" + stepCount + ": " + step.description() +
-                            ". Reason: " + reason + ". Plan halted. Ask the player how to proceed.");
+                    publishFramework("[task:" + plan.summary() + "][step " + (i + 1) + "/" + steps.size() + "] FAILED: " + reason);
+
+                    // --- DEPS explain-then-replan (Q1) ---
+                    EscalationOutcome outcome = handleStepFailure(
+                            plan, steps, i, step, reason,
+                            escalationCount, maxEscalations,
+                            bot, current, onUpdate);
+                    escalationCount = outcome.newEscalationCount();
+
+                    if (outcome.shouldAbort()) {
+                        return; // terminal state already set by handleStepFailure
+                    }
+                    if (outcome.shouldRetry()) {
+                        i--;   // rewind loop counter; loop increment will bring it back to i
+                        continue;
+                    }
+                    if (outcome.revisedStepList() != null) {
+                        // REVISE: replace steps from current index onward with the new list.
+                        List<Step> revised = outcome.revisedStepList();
+                        steps.subList(i, steps.size()).clear();
+                        steps.addAll(revised);
+                        i--;   // step i will be re-attempted with the revised first step
+                        continue;
+                    }
+                    // Defensive: if we somehow fall through without a clear directive, abort.
                     return;
                 }
 
@@ -219,16 +242,16 @@ public class JobSupervisor {
                         "planId", plan.id().toString(),
                         "step", i,
                         "description", step.description()));
-                publishFramework("[task:" + plan.summary() + "][step " + (i + 1) + "/" + stepCount + "] done");
+                publishFramework("[task:" + plan.summary() + "][step " + (i + 1) + "/" + steps.size() + "] done");
             }
 
             // All steps completed.
             log.info("JobSupervisor: plan '{}' completed", plan.summary());
-            TaskSnapshot completed = withState(current.get(), TaskState.COMPLETED, stepCount - 1, "done");
+            TaskSnapshot completed = withState(current.get(), TaskState.COMPLETED, steps.size() - 1, "done");
             onUpdate.accept(completed);
             counters.inc("plan.completed");
             runLog.log("plan_completed", Map.of("planId", plan.id().toString()));
-            publishFramework("[task:" + plan.summary() + "] completed (" + stepCount + " steps)");
+            publishFramework("[task:" + plan.summary() + "] completed (" + steps.size() + " steps)");
             jobTracker.clearJob();
 
         } catch (Throwable t) {
@@ -241,6 +264,151 @@ public class JobSupervisor {
                 // Best-effort — if the update callback itself throws, swallow it to avoid masking the original error.
             }
         }
+    }
+
+    /**
+     * Apply the DEPS explain-then-replan escalation for a failed step.
+     *
+     * <p>If the escalation cap has been reached, forces ABANDON without an LLM call.
+     * Otherwise calls {@link LangChain4jService#processFailureEscalation} and interprets
+     * the {@link FailureDecision}:</p>
+     * <ul>
+     *   <li>RETRY — caller should decrement step index and retry.</li>
+     *   <li>REVISE — caller should replace remaining steps from the revised plan.</li>
+     *   <li>ABANDON — task is marked FAILED; caller should return.</li>
+     * </ul>
+     */
+    private EscalationOutcome handleStepFailure(
+            Plan plan, List<Step> steps,
+            int stepIndex, Step step, String reason,
+            int escalationCount, int maxEscalations,
+            BotOperations bot,
+            AtomicReference<TaskSnapshot> current,
+            Consumer<TaskSnapshot> onUpdate) {
+
+        // Build world-state snapshot with whatever the bot can tell us cheaply.
+        Map<String, Object> worldState = Map.of(
+                "position", bot.getCurrentPosition().toString(),
+                "stepIndex", stepIndex,
+                "totalSteps", steps.size());
+
+        int retriesUsed = step.retry() != null ? step.retry().maxRetries() : 0;
+
+        TaskFailure failure = new TaskFailure(
+                plan.id(),
+                plan.summary(),
+                stepIndex,
+                steps.size(),
+                step.description(),
+                reason,
+                retriesUsed,
+                worldState);
+
+        FailureDecision decision;
+
+        if (escalationCount >= maxEscalations) {
+            // Hard cap reached — abandon without another LLM call.
+            log.warn("JobSupervisor: escalation cap ({}) reached for plan '{}'. Forcing ABANDON.",
+                    maxEscalations, plan.summary());
+            counters.inc("plan.escalation.cap_hit");
+            decision = new FailureDecision(
+                    "Max escalations reached (" + maxEscalations + "). Abandoning plan.",
+                    FailureDecision.ABANDON, null);
+        } else {
+            decision = langChainService.processFailureEscalation(failure);
+        }
+
+        int newEscalationCount = escalationCount + 1;
+
+        log.info("JobSupervisor: escalation #{} → action={} explanation='{}'",
+                newEscalationCount, decision.action(), decision.explanation());
+        runLog.log("plan_escalation", Map.of(
+                "planId", plan.id().toString(),
+                "step", stepIndex,
+                "action", decision.action(),
+                "escalationCount", newEscalationCount));
+
+        return switch (decision.action()) {
+            case FailureDecision.RETRY -> {
+                publishFramework("[task:" + plan.summary() + "] escalation: retrying step " +
+                        (stepIndex + 1) + " — " + decision.explanation());
+                yield EscalationOutcome.retry(newEscalationCount);
+            }
+
+            case FailureDecision.REVISE -> {
+                List<Step> revisedSteps = convertRevisedPlan(decision, plan, stepIndex, current, onUpdate);
+                if (revisedSteps == null) {
+                    // Conversion failed — escalate to ABANDON.
+                    String abandonReason = "REVISE conversion failed; abandoning. " + reason;
+                    markFailed(plan, stepIndex, abandonReason, current, onUpdate);
+                    notifyPlayerAndFramework(plan, decision.explanation());
+                    yield EscalationOutcome.abort(newEscalationCount);
+                }
+                publishFramework("[task:" + plan.summary() + "] plan revised — " + decision.explanation());
+                yield EscalationOutcome.revise(revisedSteps, newEscalationCount);
+            }
+
+            default -> { // ABANDON (and any unexpected value)
+                String abandonReason = decision.explanation() + " [original: " + reason + "]";
+                markFailed(plan, stepIndex, abandonReason, current, onUpdate);
+                notifyPlayerAndFramework(plan, decision.explanation());
+                yield EscalationOutcome.abort(newEscalationCount);
+            }
+        };
+    }
+
+    /**
+     * Convert the {@code revisedPlan} map from a {@link FailureDecision} into a typed
+     * list of {@link Step}s using {@link PlanFromDraftConverter}.
+     *
+     * @return the revised steps, or null if conversion fails (caller should ABANDON)
+     */
+    @SuppressWarnings("unchecked")
+    private List<Step> convertRevisedPlan(
+            FailureDecision decision, Plan plan, int stepIndex,
+            AtomicReference<TaskSnapshot> current, Consumer<TaskSnapshot> onUpdate) {
+
+        if (decision.revisedPlan() == null) {
+            log.error("JobSupervisor: REVISE decision has null revisedPlan for plan '{}'", plan.summary());
+            return null;
+        }
+
+        try {
+            Object rawSteps = decision.revisedPlan().get("steps");
+            if (!(rawSteps instanceof List<?> stepList)) {
+                log.error("JobSupervisor: revisedPlan.steps is not a List for plan '{}'", plan.summary());
+                return null;
+            }
+            Object rawSummary = decision.revisedPlan().getOrDefault("summary", plan.summary());
+            PlanDraft draft = new PlanDraft(
+                    rawSummary.toString(),
+                    (List<Map<String, Object>>) stepList);
+            Plan revised = PlanFromDraftConverter.convert(draft, plan.requestedBy());
+            return new ArrayList<>(revised.steps());
+        } catch (Exception e) {
+            log.error("JobSupervisor: failed to convert revised plan for '{}'", plan.summary(), e);
+            counters.inc("plan.escalation.revise_conversion_error");
+            return null;
+        }
+    }
+
+    /** Mark the task as FAILED and fire the update callback. */
+    private void markFailed(Plan plan, int stepIndex, String reason,
+                             AtomicReference<TaskSnapshot> current,
+                             Consumer<TaskSnapshot> onUpdate) {
+        TaskSnapshot failed = withFailure(current.get(), stepIndex, reason);
+        current.set(failed);
+        onUpdate.accept(failed);
+        counters.inc("plan.failed");
+        runLog.log("plan_failed", Map.of(
+                "planId", plan.id().toString(),
+                "step", stepIndex,
+                "reason", reason));
+    }
+
+    /** Send the explanation to the player via framework context and outbound chat. */
+    private void notifyPlayerAndFramework(Plan plan, String explanation) {
+        publishFramework("[task:" + plan.summary() + "] ABANDONED — " + explanation);
     }
 
     /**
@@ -471,11 +639,34 @@ public class JobSupervisor {
     }
 
     // -------------------------------------------------------------------------
-    // Inner value type
+    // Inner value types
     // -------------------------------------------------------------------------
 
     private record StepResult(boolean succeeded, String failureReason) {
         static StepResult ok() { return new StepResult(true, null); }
         static StepResult fail(String reason) { return new StepResult(false, reason); }
+    }
+
+    /**
+     * Result of a single escalation call.
+     *
+     * <p>Exactly one of the three action flags is true; the others are false.
+     * {@code revisedStepList} is non-null only when {@code shouldRevise} is true.</p>
+     */
+    private record EscalationOutcome(
+            boolean shouldAbort,
+            boolean shouldRetry,
+            List<Step> revisedStepList,
+            int newEscalationCount
+    ) {
+        static EscalationOutcome abort(int count) {
+            return new EscalationOutcome(true, false, null, count);
+        }
+        static EscalationOutcome retry(int count) {
+            return new EscalationOutcome(false, true, null, count);
+        }
+        static EscalationOutcome revise(List<Step> steps, int count) {
+            return new EscalationOutcome(false, false, steps, count);
+        }
     }
 }

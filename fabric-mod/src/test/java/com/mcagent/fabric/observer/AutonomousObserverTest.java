@@ -2,6 +2,7 @@ package com.mcagent.fabric.observer;
 
 import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.model.EntityInfo;
+import com.mcagent.core.observer.BotMode;
 import com.mcagent.core.reflex.ReflexSnapshot;
 import com.mcagent.core.reflex.SurvivalReflexes;
 import com.mcagent.core.service.BotOperations;
@@ -61,11 +62,10 @@ class AutonomousObserverTest {
     @BeforeEach
     void setUp() {
         config = new BotProperties.ObservationProperties();
-        config.setEnabled(true);
+        config.setMode(BotMode.WATCH);
         config.setScanIntervalTicks(5);
         config.setThreatRadius(32);
         config.setPassiveRadius(16);
-        config.setMode("passive");
         config.setMessageMode("individual");
         config.setDebounceSeconds(10);
         config.setTrackPassiveMobs(true);
@@ -143,7 +143,7 @@ class AutonomousObserverTest {
 
     @Test
     void activeModeTriggersUrgentFramework() {
-        observer.setMode("active");
+        observer.setBotMode(BotMode.AUTO);
         var threat = new ThreatInfo("Creeper", new BotOperations.Location(15, 64, 15), 5.0, "E");
         when(botOperations.getNearbyThreats(32)).thenReturn(List.of(threat));
 
@@ -250,7 +250,7 @@ class AutonomousObserverTest {
         cache.update(warmSnap);
 
         // Use full constructor with active mode.
-        config.setMode("active");
+        config.setMode(BotMode.AUTO);
         observer = new AutonomousObserver(
                 botOperations, eventQueue, config,
                 new com.mcagent.core.telemetry.JobTracker(),
@@ -262,7 +262,9 @@ class AutonomousObserverTest {
                 survivalReflexes,
                 botProps,
                 null,   // no task executor in reflex tests
-                null);  // no inventoryOps in reflex tests
+                null,   // no inventoryOps in reflex tests
+                null,   // no autoModeDriver in reflex tests
+                null);  // no routineService in reflex tests
 
         // Cache is warm so scan() reads from it; no bridge calls are needed.
         when(survivalReflexes.tickReflexes(any(ReflexSnapshot.class)))
@@ -292,7 +294,7 @@ class AutonomousObserverTest {
         );
         cache.update(warmSnap);
 
-        config.setMode("passive");
+        config.setMode(BotMode.WATCH);
         observer = new AutonomousObserver(
                 botOperations, eventQueue, config,
                 new com.mcagent.core.telemetry.JobTracker(),
@@ -304,7 +306,9 @@ class AutonomousObserverTest {
                 survivalReflexes,
                 botProps,
                 null,   // no task executor in reflex tests
-                null);  // no inventoryOps in reflex tests
+                null,   // no inventoryOps in reflex tests
+                null,   // no autoModeDriver in reflex tests
+                null);  // no routineService in reflex tests
 
         // Cache is warm; scan finds no threats/opportunities and returns early — no bridge calls.
         tickToScan();
@@ -331,7 +335,7 @@ class AutonomousObserverTest {
         );
         cache.update(warmSnap);
 
-        config.setMode("active");
+        config.setMode(BotMode.AUTO);
         observer = new AutonomousObserver(
                 botOperations, eventQueue, config,
                 new com.mcagent.core.telemetry.JobTracker(),
@@ -343,7 +347,9 @@ class AutonomousObserverTest {
                 survivalReflexes,
                 botProps,
                 null,   // no task executor in reflex tests
-                null);  // no inventoryOps in reflex tests
+                null,   // no inventoryOps in reflex tests
+                null,   // no autoModeDriver in reflex tests
+                null);  // no routineService in reflex tests
 
         // Cache is warm; scan finds no threats/opportunities and returns early — no bridge calls.
         tickToScan();
@@ -359,7 +365,7 @@ class AutonomousObserverTest {
 
         WorldStateCache cache = new WorldStateCache();  // snapshot = EMPTY
 
-        config.setMode("active");
+        config.setMode(BotMode.AUTO);
         observer = new AutonomousObserver(
                 botOperations, eventQueue, config,
                 new com.mcagent.core.telemetry.JobTracker(),
@@ -371,7 +377,9 @@ class AutonomousObserverTest {
                 survivalReflexes,
                 botProps,
                 null,   // no task executor in reflex tests
-                null);  // no inventoryOps in reflex tests
+                null,   // no inventoryOps in reflex tests
+                null,   // no autoModeDriver in reflex tests
+                null);  // no routineService in reflex tests
 
         when(botOperations.getNearbyThreats(anyInt())).thenReturn(List.of());
         when(botOperations.getNearbyEntities(anyString(), anyInt())).thenReturn(List.of());
@@ -480,7 +488,9 @@ class AutonomousObserverTest {
                 null,
                 null,
                 executor,
-                null);  // no inventoryOps
+                null,   // no inventoryOps
+                null,   // no autoModeDriver
+                null);  // no routineService
     }
 
     /**
@@ -500,7 +510,9 @@ class AutonomousObserverTest {
                 null,
                 null,
                 executor,
-                null);  // no inventoryOps
+                null,   // no inventoryOps
+                null,   // no autoModeDriver
+                null);  // no routineService
     }
 
     private void tickToScan(AutonomousObserver obs) {
@@ -546,7 +558,7 @@ class AutonomousObserverTest {
         AutonomousObserver obs = new AutonomousObserver(
                 botOperations, eventQueue, config,
                 jobTracker, counters, null, null,
-                () -> null, null, null, botProps, taskExecutor, inventoryOps);
+                () -> null, null, null, botProps, taskExecutor, inventoryOps, null, null);
 
         tickToScan(obs);
 
@@ -579,7 +591,7 @@ class AutonomousObserverTest {
         AutonomousObserver obs = new AutonomousObserver(
                 botOperations, eventQueue, config,
                 jobTracker, counters, null, null,
-                () -> null, null, null, botProps, taskExecutor, inventoryOps);
+                () -> null, null, null, botProps, taskExecutor, inventoryOps, null, null);
 
         tickToScan(obs);
 
@@ -598,5 +610,108 @@ class AutonomousObserverTest {
                 new com.mcagent.core.task.TerminationPolicy(java.time.Duration.ofHours(3), true));
         return new TaskSnapshot(plan.id(), plan, TaskState.RUNNING, 0, "47/200 IRON_ORE",
                 startedAt, Optional.empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // BotMode gating tests (Sprint 14 A1)
+    // -----------------------------------------------------------------------
+
+    @Test
+    void standby_preventsScanning() {
+        observer.setBotMode(BotMode.STANDBY);
+
+        tickToScan();
+
+        verify(botOperations, never()).getNearbyThreats(anyInt());
+        verify(botOperations, never()).getNearbyEntities(anyString(), anyInt());
+    }
+
+    @Test
+    void watch_allowsScanning() {
+        observer.setBotMode(BotMode.WATCH);
+        var threat = new ThreatInfo("Zombie", new BotOperations.Location(10, 64, 20), 8.0, "NE");
+        when(botOperations.getNearbyThreats(32)).thenReturn(List.of(threat));
+
+        tickToScan();
+
+        verify(eventQueue).publishFramework(anyString());
+    }
+
+    @Test
+    void auto_allowsScanning_andUsesUrgentChannel() {
+        observer.setBotMode(BotMode.AUTO);
+        var threat = new ThreatInfo("Creeper", new BotOperations.Location(5, 64, 5), 3.0, "S");
+        when(botOperations.getNearbyThreats(32)).thenReturn(List.of(threat));
+
+        tickToScan();
+
+        verify(eventQueue).triggerUrgentFramework(anyString());
+    }
+
+    @Test
+    void getBotMode_returnsCurrentMode() {
+        observer.setBotMode(BotMode.AUTO);
+        assertThat(observer.getBotMode()).isEqualTo(BotMode.AUTO);
+
+        observer.setBotMode(BotMode.WATCH);
+        assertThat(observer.getBotMode()).isEqualTo(BotMode.WATCH);
+
+        observer.setBotMode(BotMode.STANDBY);
+        assertThat(observer.getBotMode()).isEqualTo(BotMode.STANDBY);
+    }
+
+    @Test
+    void auto_warmCache_tickReflexesIsCalled_viaBotMode() {
+        // Same scenario as activeMode_warmCache_tickReflexesIsCalled but using setBotMode.
+        BotProperties botProps = new BotProperties();
+        botProps.getReflex().setEnabled(true);
+
+        WorldStateCache cache = new WorldStateCache();
+        WorldStateCache.Snapshot warmSnap = new WorldStateCache.Snapshot(
+                new BotOperations.Location(0, 64, 0),
+                new BotOperations.HealthStatus(18f, 20f, 15, 0),
+                List.of(), List.of(), List.of(), "bread x4", 6000, false, 12);
+        cache.update(warmSnap);
+
+        config.setMode(BotMode.AUTO);
+        AutonomousObserver obs = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                new com.mcagent.core.telemetry.Counters(),
+                null, null, () -> null,
+                cache, survivalReflexes, botProps, null, null, null, null);
+
+        when(survivalReflexes.tickReflexes(any(ReflexSnapshot.class)))
+                .thenReturn(SurvivalReflexes.Action.NONE);
+
+        tickToScan(obs);
+
+        verify(survivalReflexes).tickReflexes(any(ReflexSnapshot.class));
+    }
+
+    @Test
+    void watch_warmCache_reflexesNeverCalled_viaBotMode() {
+        // WATCH mode: reflexes must be off (Sprint 14 A1 scope).
+        BotProperties botProps = new BotProperties();
+        botProps.getReflex().setEnabled(true);
+
+        WorldStateCache cache = new WorldStateCache();
+        WorldStateCache.Snapshot warmSnap = new WorldStateCache.Snapshot(
+                new BotOperations.Location(0, 64, 0),
+                new BotOperations.HealthStatus(18f, 20f, 15, 0),
+                List.of(), List.of(), List.of(), "", 6000, false, 12);
+        cache.update(warmSnap);
+
+        config.setMode(BotMode.WATCH);
+        AutonomousObserver obs = new AutonomousObserver(
+                botOperations, eventQueue, config,
+                new com.mcagent.core.telemetry.JobTracker(),
+                new com.mcagent.core.telemetry.Counters(),
+                null, null, () -> null,
+                cache, survivalReflexes, botProps, null, null, null, null);
+
+        tickToScan(obs);
+
+        verify(survivalReflexes, never()).tickReflexes(any());
     }
 }

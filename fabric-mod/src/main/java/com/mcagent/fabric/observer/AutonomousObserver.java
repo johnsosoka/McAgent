@@ -2,14 +2,19 @@ package com.mcagent.fabric.observer;
 
 import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.model.EntityInfo;
+import com.mcagent.core.observer.BotMode;
 import com.mcagent.core.reflex.ReflexSnapshot;
 import com.mcagent.core.reflex.SurvivalReflexes;
+import com.mcagent.core.routine.AutoModeDriver;
+import com.mcagent.core.routine.RoutineInvocation;
+import com.mcagent.core.routine.RoutineService;
 import com.mcagent.core.service.BotOperations.HealthStatus;
 import com.mcagent.core.service.BotOperations.Location;
 import com.mcagent.core.service.BotOperations.ThreatInfo;
 import com.mcagent.core.service.ops.BotControlOperations;
 import com.mcagent.core.service.ops.InventoryOperations;
 import com.mcagent.core.service.ops.ObservationOperations;
+import com.mcagent.core.task.Plan;
 import com.mcagent.core.task.TaskExecutor;
 import com.mcagent.core.task.TaskSnapshot;
 import com.mcagent.core.task.TaskState;
@@ -62,9 +67,12 @@ public class AutonomousObserver {
     private final TaskExecutor taskExecutor;
     // Nullable: when present, heartbeat messages include inventory summary.
     private final InventoryOperations inventoryOps;
+    // Nullable: when present, auto-mode idle-goal selection is active.
+    private final AutoModeDriver autoModeDriver;
+    // Nullable: required alongside autoModeDriver to invoke selected routines.
+    private final RoutineService routineService;
 
     private int tickCounter;
-    private volatile boolean enabled;
 
     /**
      * Full constructor used in production wiring (via {@code McAgentFabricMod}).
@@ -86,6 +94,10 @@ public class AutonomousObserver {
      * @param inventoryOps        inventory operations used to retrieve the inventory summary
      *                            for heartbeat messages; may be {@code null} in lightweight
      *                            test wiring (heartbeat will omit inventory info).
+     * @param autoModeDriver      selects idle-goal routines in AUTO mode; may be {@code null}
+     *                            in lightweight test wiring that does not exercise auto-mode selection.
+     * @param routineService      invokes selected routines; must be non-null when
+     *                            {@code autoModeDriver} is also non-null.
      */
     public AutonomousObserver(ObservationOperations botOperations,
                               BotEventQueue eventQueue,
@@ -99,7 +111,9 @@ public class AutonomousObserver {
                               SurvivalReflexes survivalReflexes,
                               BotProperties botProps,
                               TaskExecutor taskExecutor,
-                              InventoryOperations inventoryOps) {
+                              InventoryOperations inventoryOps,
+                              AutoModeDriver autoModeDriver,
+                              RoutineService routineService) {
         if (botOperations == null) {
             throw new IllegalArgumentException("botOperations must not be null");
         }
@@ -131,9 +145,10 @@ public class AutonomousObserver {
         this.botProps = botProps;
         this.taskExecutor = taskExecutor;
         this.inventoryOps = inventoryOps;
+        this.autoModeDriver = autoModeDriver;
+        this.routineService = routineService;
         this.debounceMap = new ConcurrentHashMap<>();
         this.deathDetector = new DeathDetector();
-        this.enabled = config.isEnabled();
     }
 
     /**
@@ -156,13 +171,16 @@ public class AutonomousObserver {
                 null,         // no reflexes in lightweight test wiring
                 null,         // no botProps in lightweight test wiring
                 null,         // no taskExecutor in lightweight test wiring
-                null);        // no inventoryOps in lightweight test wiring
+                null,         // no inventoryOps in lightweight test wiring
+                null,         // no autoModeDriver in lightweight test wiring
+                null);        // no routineService in lightweight test wiring
     }
 
     public void onTick() {
         checkDeath();
 
-        if (!enabled) {
+        // STANDBY: observer is off — no scanning, no reflexes.
+        if (config.getMode() == BotMode.STANDBY) {
             return;
         }
         if (++tickCounter < config.getScanIntervalTicks()) {
@@ -239,28 +257,74 @@ public class AutonomousObserver {
         log.info("Bot respawn detected at ({},{},{})", x, y, z);
     }
 
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-        if (!enabled) {
+    /**
+     * Set the bot mode directly using the {@link BotMode} enum.
+     * Prefer this over the deprecated string-based {@link #setMode(String)}.
+     */
+    public void setBotMode(BotMode mode) {
+        if (mode == BotMode.STANDBY) {
             tickCounter = 0;
         }
-        log.info("AutonomousObserver enabled={}", enabled);
+        config.setMode(mode);
+        log.info("AutonomousObserver mode set to {}", mode);
     }
 
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public String getMode() {
+    /**
+     * Returns the current {@link BotMode}.
+     */
+    public BotMode getBotMode() {
         return config.getMode();
     }
 
-    public void setMode(String mode) {
-        if (!"passive".equalsIgnoreCase(mode) && !"active".equalsIgnoreCase(mode)) {
-            throw new IllegalArgumentException("mode must be 'passive' or 'active'");
+    /**
+     * Returns {@code true} when the observer is active (any mode other than {@link BotMode#STANDBY}).
+     *
+     * @deprecated Check {@link #getBotMode()} directly to distinguish WATCH from AUTO.
+     */
+    @Deprecated
+    public boolean isEnabled() {
+        return config.getMode() != BotMode.STANDBY;
+    }
+
+    /**
+     * Enables or disables the observer using the legacy boolean API.
+     * {@code false} maps to {@link BotMode#STANDBY}; {@code true} restores
+     * {@link BotMode#WATCH} (unless mode is already {@link BotMode#AUTO}).
+     *
+     * @deprecated Use {@link #setBotMode(BotMode)} instead.
+     */
+    @Deprecated
+    public void setEnabled(boolean enabled) {
+        log.debug("Deprecated setEnabled({}) called on AutonomousObserver. Use setBotMode().", enabled);
+        config.setEnabled(enabled);
+        if (!enabled) {
+            tickCounter = 0;
         }
-        config.setMode(mode.toLowerCase());
-        log.info("AutonomousObserver mode set to {}", mode.toLowerCase());
+        log.info("AutonomousObserver enabled={} (mode={})", enabled, config.getMode());
+    }
+
+    /**
+     * Returns the current mode as a legacy string: {@code "active"}, {@code "passive"}, or {@code "off"}.
+     *
+     * @deprecated Use {@link #getBotMode()} instead.
+     */
+    @Deprecated
+    public String getMode() {
+        return config.getModeString();
+    }
+
+    /**
+     * Sets the mode from a legacy string value ({@code "passive"} or {@code "active"}).
+     * Emits a debug-level deprecation log entry.
+     *
+     * @deprecated Use {@link #setBotMode(BotMode)} instead.
+     * @throws IllegalArgumentException if the string is not a recognised legacy mode.
+     */
+    @Deprecated
+    public void setMode(String mode) {
+        log.debug("Deprecated mode toggle via string '{}'. Use setBotMode(BotMode).", mode);
+        config.setModeFromString(mode);
+        log.info("AutonomousObserver mode set to {} (via legacy string '{}')", config.getMode(), mode);
     }
 
     public void setMessageMode(String messageMode) {
@@ -272,8 +336,10 @@ public class AutonomousObserver {
 
     private void scan() {
         // Reflex layer — deterministic, sub-LLM, silent. Runs before threat/opportunity
-        // reporting so survival actions fire first. Only active in "active" mode.
-        if ("active".equalsIgnoreCase(config.getMode())
+        // reporting so survival actions fire first. Only active in AUTO mode.
+        // Sprint 14 A1 scope: reflexes are OFF in WATCH (revisit in Sprint 14 C4
+        // when the formal behaviour tree introduces a safety-subset reflex mode).
+        if (config.getMode() == BotMode.AUTO
                 && survivalReflexes != null
                 && botProps != null
                 && botProps.getReflex().isEnabled()) {
@@ -305,6 +371,8 @@ public class AutonomousObserver {
         }
 
         maybeEmitHeartbeat();
+
+        maybePickIdleRoutine();
 
         cleanExpiredDebounces();
 
@@ -517,6 +585,63 @@ public class AutonomousObserver {
         return value.length() <= maxLen ? value : value.substring(0, maxLen - 1) + "…";
     }
 
+    /**
+     * In AUTO mode, when no task is running, ask the {@link AutoModeDriver} to select an
+     * idle-goal routine and submit it to the {@link TaskExecutor}.
+     *
+     * <p>Requires both {@code autoModeDriver} and {@code routineService} to be non-null
+     * (set in full-constructor wiring). In lightweight test wiring both are null and this
+     * method is a no-op.</p>
+     */
+    private void maybePickIdleRoutine() {
+        if (autoModeDriver == null || routineService == null || taskExecutor == null) {
+            return;
+        }
+        if (config.getMode() != BotMode.AUTO) {
+            return;
+        }
+        if (taskExecutor.currentTask().isPresent()) {
+            return;
+        }
+
+        HealthStatus health = null;
+        int worldTime = 0;
+        boolean isNight = false;
+        try {
+            WorldStateCache.Snapshot cached = (worldStateCache != null) ? worldStateCache.get() : null;
+            if (cached != null && !cached.isEmpty()) {
+                health = cached.health();
+                worldTime = cached.worldTime();
+                isNight = cached.isNight();
+            } else {
+                worldTime = botOperations.getWorldTime();
+                isNight = botOperations.isNight();
+                health = botOperations.getHealthStatus();
+            }
+        } catch (Exception e) {
+            log.debug("AutoModeDriver: could not read world state: {}", e.getMessage());
+        }
+
+        Optional<RoutineInvocation> chosen = autoModeDriver.pickRoutine(health, worldTime, isNight);
+        if (chosen.isEmpty()) {
+            return;
+        }
+
+        RoutineInvocation invocation = chosen.get();
+        try {
+            Plan plan = routineService.invoke(invocation.routineName(), invocation.params());
+            taskExecutor.submit(plan);
+            eventQueue.publishFramework(
+                    "AUTO: idle routine '" + invocation.routineName() + "' started.");
+            if (runLog != null) {
+                runLog.log("auto_routine_started", Map.of("routine", invocation.routineName()));
+            }
+            log.info("AutoModeDriver selected routine '{}'; plan submitted", invocation.routineName());
+        } catch (Exception e) {
+            log.warn("AutoModeDriver: failed to invoke routine '{}': {}", invocation.routineName(), e.getMessage());
+        }
+    }
+
     private void cleanExpiredDebounces() {
         long now = System.currentTimeMillis();
         long window = config.getDebounceSeconds() * 1000L;
@@ -593,7 +718,7 @@ public class AutonomousObserver {
     }
 
     private void publish(String message) {
-        if ("active".equalsIgnoreCase(config.getMode())) {
+        if (config.getMode() == BotMode.AUTO) {
             eventQueue.triggerUrgentFramework(message);
         } else {
             eventQueue.publishFramework(message);

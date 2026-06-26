@@ -35,4 +35,28 @@ class AssistantSystemPromptTest {
                 .as("System prompt must contain <voice_guidance> block")
                 .contains("<voice_guidance>");
     }
+
+    @Test
+    void systemPrompt_containsDisambiguationGuidance() throws Exception {
+        String systemPrompt = Assistant.class
+                .getMethod("chat", String.class)
+                .getAnnotation(SystemMessage.class)
+                .value()[0];
+
+        assertThat(systemPrompt)
+                .as("System prompt must contain <disambiguation_guidance> block")
+                .contains("<disambiguation_guidance>");
+    }
+
+    @Test
+    void systemPrompt_disambiguationMentionsTwoQuestionMax() throws Exception {
+        String systemPrompt = Assistant.class
+                .getMethod("chat", String.class)
+                .getAnnotation(SystemMessage.class)
+                .value()[0];
+
+        assertThat(systemPrompt)
+                .as("System prompt must state the two-question maximum rule")
+                .contains("Never ask more than 2");
+    }
 }

@@ -1,5 +1,6 @@
 package com.mcagent.core.tools;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mcagent.core.memory.LocationMemoryEntry;
 import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.LocationType;
@@ -8,6 +9,9 @@ import com.mcagent.core.memory.VectorMemoryService;
 import com.mcagent.core.model.BotAction;
 import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PlayerInfo;
+import com.mcagent.core.routine.RoutineDefinition;
+import com.mcagent.core.routine.RoutineNotFoundException;
+import com.mcagent.core.routine.RoutineService;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.BotOperations.Location;
 import com.mcagent.core.service.ChatService;
@@ -141,6 +145,8 @@ public class MinecraftTools {
         return Optional.ofNullable(fn).map(f -> f.apply(args).pc());
     }
 
+    private static final ObjectMapper JACKSON = new ObjectMapper();
+
     private final BotOperations bot;
     private final LocationMemoryService locationMemory;
     private final VectorMemoryService vectorMemory;
@@ -154,6 +160,7 @@ public class MinecraftTools {
     private final Planner planner;
     private final PlanApprovalGate approvalGate;
     private final PendingApprovalStore pendingApprovalStore;
+    private final RoutineService routineService;
 
     /**
      * Injected lazily to break the {@code MinecraftTools → LangChain4jService → Assistant → MinecraftTools}
@@ -857,6 +864,85 @@ public class MinecraftTools {
                 log.warn("Plan rejected for request '{}': {}", playerRequest, e.getMessage());
                 return "Plan rejected: " + e.getMessage();
             }
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Routine tools (Sprint 14 A4)
+    // -------------------------------------------------------------------------
+
+    @Tool("Invoke a previously defined Routine by name with parameters. Routines are parameterized Plan templates " +
+            "(e.g. 'returnHome' takes baseX/baseY/baseZ).")
+    public String submitRoutine(
+            @P("The routine name (e.g. 'returnHome', 'mineUntilFull')") String name,
+            @P("JSON map of parameter values, e.g. {\"baseX\":100,\"baseY\":64,\"baseZ\":200}") String paramsJson
+    ) {
+        log.info("Tool: submitRoutine({}, {})", name, paramsJson);
+        return withToolScope("submitRoutine", new NoOp(), () -> {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> args = JACKSON.readValue(paramsJson, Map.class);
+                Plan plan = routineService.invoke(name, args);
+
+                if (approvalGate.requiresApproval(plan)) {
+                    pendingApprovalStore.set(plan);
+                    String preview = formatPlanPreview(plan);
+                    chatService.send(preview);
+                    return "Routine '" + name + "' loaded — awaiting approval. " + preview;
+                }
+
+                TaskSnapshot snapshot = taskExecutor.submit(plan);
+                chatService.send("Routine '" + name + "' started.");
+                return "Routine '" + name + "' started (id=" + snapshot.id() + ").";
+
+            } catch (RoutineNotFoundException e) {
+                List<String> available = routineService.listAll().stream()
+                        .map(RoutineDefinition::getName)
+                        .toList();
+                return "Unknown routine: " + name + ". Available: " + available;
+            } catch (IllegalStateException e) {
+                return "Cannot start routine — another plan is already running. Cancel it first.";
+            } catch (Exception e) {
+                return "Routine invocation failed: " + e.getMessage();
+            }
+        });
+    }
+
+    @Tool("Define a new Routine — a parameterized Plan template the bot can re-invoke later by name.")
+    public String defineRoutine(
+            @P("Routine name (camelCase, e.g. 'gatherWood')") String name,
+            @P("One-line description of what this routine does") String description,
+            @P("Plan template as JSON array of steps with ${param} placeholders for arguments. " +
+                    "Example: [{\"type\":\"Navigate\",\"x\":\"${x}\",\"y\":\"${y}\",\"z\":\"${z}\"}]") String planTemplate,
+            @P("JSON array of parameter names this routine expects, e.g. [\"x\",\"y\",\"z\"]") String parametersJson
+    ) {
+        log.info("Tool: defineRoutine({}, ...)", name);
+        return withToolScope("defineRoutine", () -> {
+            try {
+                @SuppressWarnings("unchecked")
+                List<String> parameters = JACKSON.readValue(parametersJson, List.class);
+                UUID id = routineService.define(name, description, planTemplate, parameters);
+                return "Routine '" + name + "' defined (id=" + id + "). "
+                        + "Invoke it with: submitRoutine(\"" + name + "\", {params}).";
+            } catch (IllegalArgumentException e) {
+                return "Failed to define routine: " + e.getMessage();
+            } catch (Exception e) {
+                return "Unexpected error defining routine: " + e.getMessage();
+            }
+        });
+    }
+
+    @Tool("List all defined Routines available to invoke.")
+    public String listRoutines() {
+        log.info("Tool: listRoutines");
+        return withToolScope("listRoutines", () -> {
+            List<RoutineDefinition> all = routineService.listAll();
+            if (all.isEmpty()) {
+                return "No routines defined.";
+            }
+            return all.stream()
+                    .map(r -> r.getName() + " — " + r.getDescription())
+                    .collect(Collectors.joining("\n"));
         });
     }
 

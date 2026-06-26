@@ -1,6 +1,7 @@
 package com.mcagent.core.service;
 
 import com.mcagent.core.memory.chat.LayeredChatMemory;
+import com.mcagent.core.task.TaskFailure;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.RunLog;
 import dev.langchain4j.data.message.UserMessage;
@@ -33,6 +34,7 @@ import java.util.Map;
 public class LangChain4jService {
 
     private final Assistant assistant;
+    private final PlanFailureExplainer failureExplainer;
     private final ChatMemory chatMemory;
     private final BotOperations bot;
     private final Counters counters;
@@ -119,6 +121,41 @@ public class LangChain4jService {
             counters.inc("llm.urgent.errors");
             log.error("Urgent observation processing failed", e);
             return null;
+        }
+    }
+
+    /**
+     * Invoke the DEPS "Explain" step when a plan step has failed.
+     *
+     * <p>A single stateless LLM call produces a {@link FailureDecision} that tells
+     * {@link com.mcagent.core.task.JobSupervisor} whether to RETRY the same step,
+     * REVISE the remaining plan, or ABANDON the task and inform the player.</p>
+     *
+     * <p>If the LLM call itself fails (network error, parse error, etc.), this method
+     * returns a safe ABANDON decision with a generic message so the executor does not
+     * enter an infinite escalation loop.</p>
+     *
+     * @param failure  structured context about the failed step
+     * @return the explainer's decision — never null
+     */
+    public FailureDecision processFailureEscalation(TaskFailure failure) {
+        String prompt = failure.toStructuredPrompt();
+        counters.inc("llm.failure_explain.calls");
+        long start = System.currentTimeMillis();
+        try {
+            FailureDecision decision = failureExplainer.explain(prompt);
+            long durationMs = System.currentTimeMillis() - start;
+            counters.inc("llm.failure_explain.latency.ms.sum", durationMs);
+            runLog.log("failure_explained", Map.of(
+                    "task_id", failure.taskId().toString(),
+                    "action", decision.action(),
+                    "explanation", decision.explanation()));
+            return decision;
+        } catch (Exception e) {
+            counters.inc("llm.failure_explain.errors");
+            log.error("Failure explain LLM call failed for task {}", failure.taskId(), e);
+            // Fall back to ABANDON so the executor can clean up and tell the player.
+            return new FailureDecision("Unable to analyse failure: " + e.getMessage(), FailureDecision.ABANDON, null);
         }
     }
 

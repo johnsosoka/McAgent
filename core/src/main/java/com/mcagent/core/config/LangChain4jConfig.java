@@ -3,6 +3,7 @@ package com.mcagent.core.config;
 import com.mcagent.core.memory.chat.LayeredChatMemory;
 import com.mcagent.core.memory.chat.RollingSummaryService;
 import com.mcagent.core.service.Assistant;
+import com.mcagent.core.service.PlanFailureExplainer;
 import com.mcagent.core.service.Planner;
 import com.mcagent.core.tools.MinecraftTools;
 import dev.langchain4j.memory.ChatMemory;
@@ -79,6 +80,22 @@ public class LangChain4jConfig {
     @Bean
     public Planner planner(ChatModel chatModel) {
         return AiServices.builder(Planner.class)
+                .chatModel(chatModel)
+                .build();
+    }
+
+    /**
+     * Stateless failure-critic role (DEPS-style Explain step).
+     *
+     * <p>No memory, no tools — given a structured failure context, the explainer
+     * returns a {@link com.mcagent.core.service.FailureDecision} (RETRY / REVISE /
+     * ABANDON) with a 1–2 sentence natural-language explanation. Sprint 14 P6 will
+     * route this to a dedicated critic model; for Sprint 14 v1 it shares the same
+     * {@code ChatModel} as the {@link Assistant}.</p>
+     */
+    @Bean
+    public PlanFailureExplainer planFailureExplainer(ChatModel chatModel) {
+        return AiServices.builder(PlanFailureExplainer.class)
                 .chatModel(chatModel)
                 .build();
     }

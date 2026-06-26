@@ -1,5 +1,6 @@
 package com.mcagent.fabric;
 
+import com.mcagent.core.observer.BotMode;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.task.PendingApprovalStore;
 import com.mcagent.core.task.Plan;
@@ -31,7 +32,9 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Some commands bypass the LLM entirely for sub-500ms response times:
  * <ul>
- *   <li>Observer toggles — {@code watch}, {@code passive mode}, etc.</li>
+ *   <li>Mode commands — {@code standby}, {@code watch}, {@code auto} (canonical 3-mode model).</li>
+ *   <li>Legacy mode aliases — {@code passive mode}, {@code active mode}, {@code start watching}, etc.
+ *       These still work but emit a DEBUG log suggesting migration to the canonical commands.</li>
  *   <li>Hard-stop — {@code stop}, {@code cancel}, {@code halt}, {@code abort}.</li>
  *   <li>Status query — {@code status}, {@code what are you doing}.</li>
  * </ul>
@@ -200,29 +203,53 @@ public class FabricChatHandler {
             return true;
         }
 
-        // --- Observer toggles ---
-        if (lower.equals("watch") || lower.equals("start watching") || lower.equals("observe")) {
+        // --- Mode bypasses (canonical 3-mode commands) ---
+        if (lower.equals("standby")) {
             jobTracker.markPlayerInteraction();
-            autonomousObserver.setEnabled(true);
-            chatSender.accept("Observation enabled.");
+            autonomousObserver.setBotMode(BotMode.STANDBY);
+            chatSender.accept(buildStatusString());
+            return true;
+        }
+        if (lower.equals("watch")) {
+            jobTracker.markPlayerInteraction();
+            autonomousObserver.setBotMode(BotMode.WATCH);
+            chatSender.accept(buildStatusString());
+            return true;
+        }
+        if (lower.equals("auto")) {
+            jobTracker.markPlayerInteraction();
+            autonomousObserver.setBotMode(BotMode.AUTO);
+            chatSender.accept(buildStatusString());
+            return true;
+        }
+
+        // --- Legacy observer aliases (deprecated — map to the 3-mode model) ---
+        if (lower.equals("start watching") || lower.equals("observe")) {
+            jobTracker.markPlayerInteraction();
+            log.debug("Deprecated mode toggle: '{}'. Use 'agent standby/watch/auto' instead.", lower);
+            autonomousObserver.setBotMode(BotMode.WATCH);
+            chatSender.accept(buildStatusString());
             return true;
         }
         if (lower.equals("stop watching") || lower.equals("stop observing") || lower.equals("disable observation")) {
             jobTracker.markPlayerInteraction();
-            autonomousObserver.setEnabled(false);
-            chatSender.accept("Observation disabled.");
+            log.debug("Deprecated mode toggle: '{}'. Use 'agent standby/watch/auto' instead.", lower);
+            autonomousObserver.setBotMode(BotMode.STANDBY);
+            chatSender.accept(buildStatusString());
             return true;
         }
         if (lower.equals("passive mode") || lower.equals("set passive")) {
             jobTracker.markPlayerInteraction();
-            autonomousObserver.setMode("passive");
-            chatSender.accept("Observation mode set to passive.");
+            log.debug("Deprecated mode toggle: '{}'. Use 'agent standby/watch/auto' instead.", lower);
+            autonomousObserver.setBotMode(BotMode.WATCH);
+            chatSender.accept(buildStatusString());
             return true;
         }
         if (lower.equals("active mode") || lower.equals("set active")) {
             jobTracker.markPlayerInteraction();
-            autonomousObserver.setMode("active");
-            chatSender.accept("Observation mode set to active. I'll act on threats automatically.");
+            log.debug("Deprecated mode toggle: '{}'. Use 'agent standby/watch/auto' instead.", lower);
+            autonomousObserver.setBotMode(BotMode.AUTO);
+            chatSender.accept(buildStatusString());
             return true;
         }
 
@@ -231,14 +258,16 @@ public class FabricChatHandler {
 
     /**
      * Compose a compact status string without any LLM round-trip.
-     * Format: {@code Mode: {mode} | Observer: {on/off} | Job: {desc} ({elapsed}) | Last: {progress}[ | Death: (x,y,z)]}
+     * Format: {@code Mode: {STANDBY|WATCH|AUTO} | Observer: {on/off} | Job: {desc} ({elapsed}) | Last: {progress}[ | Death: (x,y,z)]}
      *
-     * <p>The {@code Death:} segment is appended only when a death was recorded this session.
+     * <p>The mode name is the canonical {@link BotMode} enum name in uppercase.
+     * The {@code Death:} segment is appended only when a death was recorded this session.
      * The full string is truncated to 250 chars to stay within Minecraft's chat limit.</p>
      */
     private String buildStatusString() {
-        String mode = autonomousObserver.getMode();
-        String observerState = autonomousObserver.isEnabled() ? "on" : "off";
+        BotMode botMode = autonomousObserver.getBotMode();
+        String mode = botMode.name();
+        String observerState = (botMode != BotMode.STANDBY) ? "on" : "off";
 
         // Capture the Optional once to avoid a TOCTOU race where a concurrent clearJob()
         // call could make the second getCurrentJob() return empty after isPresent() returned true.

@@ -1,7 +1,9 @@
 package com.mcagent.core.task;
 
+import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.core.service.FailureDecision;
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
@@ -65,7 +67,7 @@ class JobSupervisorConcurrencyTest {
         when(repository.save(org.mockito.ArgumentMatchers.<SessionState>any()))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog);
+        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog, new BotProperties());
         supervisor.start();
     }
 
@@ -232,5 +234,178 @@ class JobSupervisorConcurrencyTest {
                 Instant.now(),
                 List.of(new NavigateStep(0, 64, 0, Duration.ofMinutes(1), RetryPolicy.NONE)),
                 TerminationPolicy.DEFAULT);
+    }
+
+    // =========================================================================
+    // Q1: explain-then-replan escalation tests
+    // =========================================================================
+
+    /**
+     * When a step fails and the explainer returns ABANDON, the supervisor transitions
+     * the task to FAILED and does not continue executing further steps.
+     */
+    @Test
+    void stepFailure_escalationAbandon_transitionsToFailed() throws InterruptedException {
+        // Navigate step always fails — bot never starts successfully.
+        when(bot.navigateTo(99, 64, 99))
+                .thenReturn(PathResult.builder().success(false).message("Baritone error").build());
+        // Position stub for escalation world-state snapshot.
+        when(bot.getCurrentPosition()).thenReturn(new BotOperations.Location(0, 64, 0));
+
+        // Explainer always returns ABANDON.
+        FailureDecision abandon = new FailureDecision("Cannot reach destination.", FailureDecision.ABANDON, null);
+        when(langChainService.processFailureEscalation(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(abandon);
+
+        CountDownLatch terminal = new CountDownLatch(1);
+        List<TaskSnapshot> updates = new CopyOnWriteArrayList<>();
+
+        NavigateStep failingStep = new NavigateStep(99, 64, 99, Duration.ofMillis(200), RetryPolicy.NONE);
+        supervisor.submit(snapshotFor(failingStep), bot, snap -> {
+            updates.add(snap);
+            if (snap.state() == TaskState.FAILED || snap.state() == TaskState.COMPLETED
+                    || snap.state() == TaskState.CANCELLED) {
+                terminal.countDown();
+            }
+        });
+
+        assertThat(terminal.await(8, TimeUnit.SECONDS)).isTrue();
+
+        TaskSnapshot last = updates.get(updates.size() - 1);
+        assertThat(last.state()).isEqualTo(TaskState.FAILED);
+        assertThat(last.lastFailureReason().orElse("")).contains("Cannot reach destination");
+    }
+
+    /**
+     * When a step fails and the explainer returns RETRY, the supervisor retries that
+     * step. On the second attempt (after retry), the step succeeds and the plan completes.
+     */
+    @Test
+    void stepFailure_escalationRetry_retiesStepAndSucceeds() throws InterruptedException {
+        BotOperations.Location far    = new BotOperations.Location(0, 64, 0);
+        BotOperations.Location target = new BotOperations.Location(10, 64, 10);
+
+        // First navigate attempt fails; second succeeds.
+        when(bot.navigateTo(10, 64, 10))
+                .thenReturn(PathResult.builder().success(false).message("timeout").build())  // first attempt
+                .thenReturn(PathResult.builder().success(true).message("ok").build());        // after retry
+        when(bot.getCurrentPosition())
+                .thenReturn(far)      // first poll (first attempt)
+                .thenReturn(target);  // first poll (retry attempt) — arrived
+
+        FailureDecision retry = new FailureDecision("Transient timeout.", FailureDecision.RETRY, null);
+        when(langChainService.processFailureEscalation(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(retry);
+
+        CountDownLatch terminal = new CountDownLatch(1);
+        List<TaskSnapshot> updates = new CopyOnWriteArrayList<>();
+
+        NavigateStep step = new NavigateStep(10, 64, 10, Duration.ofMillis(200), RetryPolicy.NONE);
+        supervisor.submit(snapshotFor(step), bot, snap -> {
+            updates.add(snap);
+            if (snap.state() == TaskState.COMPLETED || snap.state() == TaskState.FAILED
+                    || snap.state() == TaskState.CANCELLED) {
+                terminal.countDown();
+            }
+        });
+
+        assertThat(terminal.await(8, TimeUnit.SECONDS)).isTrue();
+
+        TaskSnapshot last = updates.get(updates.size() - 1);
+        assertThat(last.state()).isEqualTo(TaskState.COMPLETED);
+    }
+
+    /**
+     * When a step fails and the explainer returns REVISE, the supervisor replaces the
+     * remaining steps with the revised plan and continues execution. The revised plan
+     * here is a single WaitForStep whose condition is immediately satisfied.
+     */
+    @Test
+    void stepFailure_escalationRevise_executesRevisedPlan() throws InterruptedException {
+        // Original step always fails.
+        when(bot.navigateTo(99, 64, 99))
+                .thenReturn(PathResult.builder().success(false).message("Baritone error").build());
+        when(bot.getCurrentPosition()).thenReturn(new BotOperations.Location(0, 64, 0));
+
+        // Revised plan: WaitFor with a condition that is immediately true.
+        when(bot.hasItem("minecraft:iron_ingot", 1)).thenReturn(true);
+
+        java.util.Map<String, Object> revisedPlan = new java.util.HashMap<>();
+        revisedPlan.put("summary", "Revised: wait for iron");
+        revisedPlan.put("steps", List.of(
+                java.util.Map.of("type", "WaitFor",
+                        "condition", java.util.Map.of("type", "InventoryHas", "itemId", "minecraft:iron_ingot", "count", 1),
+                        "timeoutSeconds", 30)));
+
+        FailureDecision revise = new FailureDecision("Wrong coords — revising.", FailureDecision.REVISE, revisedPlan);
+        when(langChainService.processFailureEscalation(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(revise);
+
+        CountDownLatch terminal = new CountDownLatch(1);
+        List<TaskSnapshot> updates = new CopyOnWriteArrayList<>();
+
+        NavigateStep failingStep = new NavigateStep(99, 64, 99, Duration.ofMillis(200), RetryPolicy.NONE);
+        supervisor.submit(snapshotFor(failingStep), bot, snap -> {
+            updates.add(snap);
+            if (snap.state() == TaskState.COMPLETED || snap.state() == TaskState.FAILED
+                    || snap.state() == TaskState.CANCELLED) {
+                terminal.countDown();
+            }
+        });
+
+        assertThat(terminal.await(8, TimeUnit.SECONDS)).isTrue();
+
+        TaskSnapshot last = updates.get(updates.size() - 1);
+        assertThat(last.state()).isEqualTo(TaskState.COMPLETED);
+    }
+
+    /**
+     * When escalation cap is reached (default 2), the third failure must force ABANDON
+     * without calling {@link LangChain4jService#processFailureEscalation} a third time.
+     *
+     * <p>The cap is set to 1 via a custom {@link BotProperties} so the test stays fast
+     * without relying on the default cap of 2.</p>
+     */
+    @Test
+    void escalationCap_forcesAbandon_withoutAdditionalLlmCall() throws InterruptedException {
+        // Configure a cap of 1 escalation — easier to trigger in tests.
+        BotProperties props = new BotProperties();
+        props.getPlan().setMaxEscalationsPerPlan(1);
+
+        supervisor.stop();
+        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog, props);
+        supervisor.start();
+
+        // Step always fails immediately (navigateTo returns failure).
+        when(bot.navigateTo(99, 64, 99))
+                .thenReturn(PathResult.builder().success(false).message("blocked").build());
+        when(bot.getCurrentPosition()).thenReturn(new BotOperations.Location(0, 64, 0));
+
+        // First escalation returns RETRY — the step will fail again.
+        // The cap (1) means the second failure should ABANDON without an LLM call.
+        FailureDecision retry = new FailureDecision("Retry it.", FailureDecision.RETRY, null);
+        when(langChainService.processFailureEscalation(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(retry);
+
+        CountDownLatch terminal = new CountDownLatch(1);
+        List<TaskSnapshot> updates = new CopyOnWriteArrayList<>();
+
+        NavigateStep step = new NavigateStep(99, 64, 99, Duration.ofMillis(100), RetryPolicy.NONE);
+        supervisor.submit(snapshotFor(step), bot, snap -> {
+            updates.add(snap);
+            if (snap.state() == TaskState.FAILED || snap.state() == TaskState.COMPLETED
+                    || snap.state() == TaskState.CANCELLED) {
+                terminal.countDown();
+            }
+        });
+
+        assertThat(terminal.await(8, TimeUnit.SECONDS)).isTrue();
+
+        TaskSnapshot last = updates.get(updates.size() - 1);
+        assertThat(last.state()).isEqualTo(TaskState.FAILED);
+
+        // Explainer was called exactly once (cap=1 means cap is hit on the 2nd failure).
+        org.mockito.Mockito.verify(langChainService, org.mockito.Mockito.times(1))
+                .processFailureEscalation(org.mockito.ArgumentMatchers.any());
     }
 }

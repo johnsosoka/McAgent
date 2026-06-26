@@ -4,6 +4,30 @@
 
 ---
 
+## 2026-06-25 — Session: Sprint 14 — Autonomy & Routines
+
+**Branch:** `feature/sprint-14-autonomy` (off Sprint 13)
+**Tests:** 486 total, 0 failures (+77 from Sprint 13)
+
+### What we shipped
+
+- **A1 — Three-mode collapse.** `BotMode` enum: `STANDBY` (off), `WATCH` (observer + critical reflexes only), `AUTO` (full autonomy). Legacy `passive`/`active` mode strings retained as deprecated shims.
+- **A4 — Named Routines.** `RoutineDefinition` JPA entity + `RoutineService` with `${param}` Jackson-tree substitution. 5 hand-seeded routines (returnHome, mineUntilFull, depositAndContinue, nightShelter, eatIfHungry). `submitRoutine`, `defineRoutine`, `listRoutines` tools. `AutoModeDriver` (Sprint 14 v1: night → nightShelter).
+- **Q1 — Explain-then-replan (DEPS).** `PlanFailureExplainer` AI-Service + `FailureDecision` (RETRY/REVISE/ABANDON). `JobSupervisor` consults it on step failure with `maxEscalationsPerPlan=2` cap. Telemetry: `llm.failure_explain.*` counters.
+- **Q9 — Disambiguation guidance.** `<disambiguation_guidance>` block: HIGH/MEDIUM/LOW confidence tiers, 2-question hard cap.
+
+### Deferred
+
+- **C4 formal BT** — Sprint 12 if/else reflex layer adequate; refactor not blocking.
+- **P6 per-role model split** — Cost optimization; recommend as Sprint 15+ follow-up.
+- **P9 cost cap** — Required before public deployment, not blocking personal use.
+
+### Next
+
+Hand `e2e-validation/sprint-14-validation.md` to John. Begin Sprint 15 (Memory & Polish — episodic memory, correction memory, reflection).
+
+---
+
 ## 2026-06-25 — Session: Sprint 13 — The Plan Layer
 
 **Branch:** `feature/sprint-13-plan-layer` (off Sprint 12)

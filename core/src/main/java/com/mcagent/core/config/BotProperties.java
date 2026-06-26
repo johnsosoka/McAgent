@@ -1,5 +1,6 @@
 package com.mcagent.core.config;
 
+import com.mcagent.core.observer.BotMode;
 import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ public class BotProperties {
     private ReflexProperties reflex = new ReflexProperties();
     private JobProperties job = new JobProperties();
     private PlanProperties plan = new PlanProperties();
+    private RoutineProperties routine = new RoutineProperties();
 
     @Data
     public static class ChatProperties {
@@ -101,11 +103,18 @@ public class BotProperties {
 
     @Data
     public static class ObservationProperties {
-        private boolean enabled = true;
+
+        private static final Logger obsLog = LoggerFactory.getLogger(ObservationProperties.class);
+
+        /**
+         * Current operating mode. Defaults to {@link BotMode#WATCH} so the observer is
+         * on but passive until the player explicitly enables autonomous action.
+         */
+        private BotMode mode = BotMode.WATCH;
+
         private int scanIntervalTicks = 20;
         private int threatRadius = 32;
         private int passiveRadius = 16;
-        private String mode = "passive";
         private String messageMode = "individual";
         private int debounceSeconds = 10;
         private boolean trackPassiveMobs = true;
@@ -120,6 +129,75 @@ public class BotProperties {
          * <p>Default: 8 blocks (approximately one combat range).</p>
          */
         private int lowRiskThreatRadius = 8;
+
+        // ------------------------------------------------------------------
+        // Backward-compatibility shims for legacy callers
+        // ------------------------------------------------------------------
+
+        /**
+         * Derives enabled state from the current mode.
+         * {@link BotMode#STANDBY} is the only mode where observation is off.
+         *
+         * @deprecated Query {@link #getMode()} instead.
+         */
+        @Deprecated
+        public boolean isEnabled() {
+            return mode != BotMode.STANDBY;
+        }
+
+        /**
+         * Maps a boolean enabled flag back to a {@link BotMode}.
+         * {@code false} → {@link BotMode#STANDBY}; {@code true} → {@link BotMode#WATCH}
+         * (preserves existing passive-on semantics when re-enabling).
+         *
+         * @deprecated Use {@link #setMode(BotMode)} instead.
+         */
+        @Deprecated
+        public void setEnabled(boolean enabled) {
+            obsLog.debug("Deprecated setEnabled({}) called; mapping to BotMode. Use setMode() instead.", enabled);
+            if (!enabled) {
+                this.mode = BotMode.STANDBY;
+            } else if (this.mode == BotMode.STANDBY) {
+                this.mode = BotMode.WATCH;
+            }
+            // If already WATCH or AUTO, keep the current mode — enabling should not downgrade AUTO → WATCH.
+        }
+
+        /**
+         * Returns the mode as a legacy string value for callers that have not yet migrated.
+         * Maps: {@link BotMode#AUTO} → {@code "active"}, {@link BotMode#WATCH} → {@code "passive"},
+         * {@link BotMode#STANDBY} → {@code "off"}.
+         *
+         * @deprecated Use {@link #getMode()} returning {@link BotMode}.
+         */
+        @Deprecated
+        public String getModeString() {
+            return switch (mode) {
+                case AUTO -> "active";
+                case WATCH -> "passive";
+                case STANDBY -> "off";
+            };
+        }
+
+        /**
+         * Sets the mode from a legacy string value. Accepted values (case-insensitive):
+         * {@code "active"}, {@code "passive"}, {@code "off"}.
+         *
+         * @deprecated Use {@link #setMode(BotMode)} instead.
+         * @throws IllegalArgumentException if the string does not map to a known mode.
+         */
+        @Deprecated
+        public void setModeFromString(String legacyMode) {
+            obsLog.debug("Deprecated setModeFromString('{}') called. Use setMode(BotMode) instead.", legacyMode);
+            BotMode mapped = switch (legacyMode.toLowerCase()) {
+                case "active" -> BotMode.AUTO;
+                case "passive" -> BotMode.WATCH;
+                case "off" -> BotMode.STANDBY;
+                default -> throw new IllegalArgumentException(
+                        "Unknown legacy mode string '" + legacyMode + "'. Expected 'active', 'passive', or 'off'.");
+            };
+            this.mode = mapped;
+        }
     }
 
     /**
@@ -172,6 +250,36 @@ public class BotProperties {
          * Default: 300s (5 minutes).
          */
         private int approvalDurationSeconds = 300;
+
+        /**
+         * Maximum number of LLM-driven failure escalations per Plan before the
+         * supervisor forces an ABANDON without making another LLM call.
+         *
+         * <p>Guards against runaway escalation loops where REVISE produces a plan
+         * that continues to fail. The default of 2 matches the DEPS paper's
+         * recommendation: explain twice, then give up rather than thrash.</p>
+         */
+        private int maxEscalationsPerPlan = 2;
+    }
+
+    /**
+     * Configuration for the {@link com.mcagent.core.routine.AutoModeDriver} that selects
+     * idle goals in {@link com.mcagent.core.observer.BotMode#AUTO} mode.
+     */
+    @Data
+    public static class RoutineProperties {
+
+        /** Master switch for the AutoModeDriver. When false, no autonomous routine selection occurs. */
+        private boolean autoDriverEnabled = true;
+
+        /** Default base X coordinate used by routines that navigate to the base (e.g. returnHome, nightShelter). */
+        private int baseX = 0;
+
+        /** Default base Y coordinate for base-navigation routines. */
+        private int baseY = 64;
+
+        /** Default base Z coordinate for base-navigation routines. */
+        private int baseZ = 0;
     }
 
     /**

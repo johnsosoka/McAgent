@@ -66,6 +66,17 @@ public interface Assistant {
             Single-step actions (navigate, eat, look around) continue to use their specific tools directly.
             </planner_delegation_guidance>
 
+            <disambiguation_guidance>
+            Before starting a multi-step task, assess ambiguity:
+            - HIGH confidence (clear location, materials, scope): submit plan via decomposeAndExecute. Approval gate handles complex plans.
+            - MEDIUM confidence (location unclear OR materials unspecified): ask 1 clarifying question, do not start.
+            - LOW confidence (intent unclear OR conflicting constraints): ask up to 2 questions, do not start.
+            Never ask more than 2 clarifying questions. If still unclear after 2, propose the most conservative interpretation and ask for approval.
+            Questions should be terse, structured, one at a time. Example:
+              Player: "build a house"
+              Bot: "Where? (here, base, or coordinates)"
+            </disambiguation_guidance>
+
             <timing_guidance>
             Navigation and follow tools send their own immediate chat confirmation (e.g. "Navigating to (100, 64, 200)").
             Do NOT send a separate "I'm starting to..." message — it may arrive after the bot has already arrived.

@@ -1,17 +1,20 @@
 package com.mcagent.core.tools;
 
+import com.mcagent.core.memory.LocationMemoryService;
+import com.mcagent.core.memory.PlayerNoteService;
+import com.mcagent.core.memory.VectorMemoryService;
 import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.model.PlayerInfo;
+import com.mcagent.core.routine.RoutineDefinition;
+import com.mcagent.core.routine.RoutineNotFoundException;
+import com.mcagent.core.routine.RoutineService;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.core.service.PlanDraft;
 import com.mcagent.core.service.Planner;
 import com.mcagent.core.service.SafetyValidator;
-import com.mcagent.core.memory.LocationMemoryService;
-import com.mcagent.core.memory.PlayerNoteService;
-import com.mcagent.core.memory.VectorMemoryService;
 import com.mcagent.core.task.MineStep;
 import com.mcagent.core.task.NavigateStep;
 import com.mcagent.core.task.PendingApprovalStore;
@@ -59,6 +62,7 @@ class MinecraftToolsTest {
     private Planner planner;
     private PlanApprovalGate approvalGate;
     private PendingApprovalStore pendingApprovalStore;
+    private RoutineService routineService;
     private MinecraftTools tools;
 
     @BeforeEach
@@ -77,6 +81,7 @@ class MinecraftToolsTest {
         planner = mock(Planner.class);
         approvalGate = mock(PlanApprovalGate.class);
         pendingApprovalStore = mock(PendingApprovalStore.class);
+        routineService = mock(RoutineService.class);
         // Default: all actions approved
         when(safetyValidator.validate(any(), anyInt()))
                 .thenReturn(SafetyValidator.ValidationResult.approved());
@@ -85,7 +90,7 @@ class MinecraftToolsTest {
         when(approvalGate.requiresApproval(any())).thenReturn(false);
         tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService,
                 safetyValidator, jobTracker, counters, runLog, taskExecutor, planner,
-                approvalGate, pendingApprovalStore);
+                approvalGate, pendingApprovalStore, routineService);
         tools.setLangChain4jService(langChain4jService);
     }
 
@@ -1114,5 +1119,105 @@ class MinecraftToolsTest {
 
         assertThat(result).startsWith("Replacing previous pending plan.");
         verify(pendingApprovalStore).set(any());
+    }
+
+    // -------------------------------------------------------------------------
+    // Routine tools (Sprint 14 A4)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void submitRoutine_shouldStartPlan_whenRoutineFound() {
+        Plan plan = new Plan(UUID.randomUUID(), "Navigate home", "routine",
+                Instant.now(),
+                List.of(new NavigateStep(0, 64, 0, null, RetryPolicy.NONE)),
+                TerminationPolicy.DEFAULT);
+        when(routineService.invoke("returnHome", Map.of("baseX", 0, "baseY", 64, "baseZ", 0)))
+                .thenReturn(plan);
+        when(approvalGate.requiresApproval(plan)).thenReturn(false);
+        TaskSnapshot snapshot = new TaskSnapshot(plan.id(), plan, TaskState.RUNNING, 0, "",
+                Instant.now(), Optional.empty());
+        when(taskExecutor.submit(plan)).thenReturn(snapshot);
+
+        String result = tools.submitRoutine("returnHome",
+                "{\"baseX\":0,\"baseY\":64,\"baseZ\":0}");
+
+        assertThat(result).contains("returnHome").contains("started");
+        verify(routineService).invoke("returnHome", Map.of("baseX", 0, "baseY", 64, "baseZ", 0));
+        verify(taskExecutor).submit(plan);
+    }
+
+    @Test
+    void submitRoutine_shouldReturnUnknownMessage_whenRoutineNotFound() {
+        when(routineService.invoke(eq("unknown"), any()))
+                .thenThrow(new RoutineNotFoundException("unknown"));
+        when(routineService.listAll()).thenReturn(List.of());
+
+        String result = tools.submitRoutine("unknown", "{}");
+
+        assertThat(result).contains("Unknown routine").contains("unknown");
+    }
+
+    @Test
+    void submitRoutine_shouldHoldForApproval_whenApprovalRequired() {
+        Plan plan = new Plan(UUID.randomUUID(), "Mine until full", "routine",
+                Instant.now(),
+                List.of(new MineStep("minecraft:iron_ore", 2048, 32, null, RetryPolicy.NONE)),
+                TerminationPolicy.DEFAULT);
+        when(routineService.invoke(eq("mineUntilFull"), any())).thenReturn(plan);
+        when(approvalGate.requiresApproval(plan)).thenReturn(true);
+
+        String result = tools.submitRoutine("mineUntilFull", "{\"blockType\":\"minecraft:iron_ore\"}");
+
+        assertThat(result).contains("mineUntilFull");
+        verify(pendingApprovalStore).set(plan);
+        verify(taskExecutor, never()).submit(any());
+    }
+
+    @Test
+    void defineRoutine_shouldPersistAndReturnId() {
+        UUID id = UUID.randomUUID();
+        when(routineService.define(eq("gatherWood"), anyString(), anyString(), any()))
+                .thenReturn(id);
+
+        String result = tools.defineRoutine(
+                "gatherWood",
+                "Gather oak logs",
+                "[{\"type\":\"Mine\",\"blockType\":\"minecraft:oak_log\",\"quantity\":64," +
+                        "\"searchRadius\":32,\"timeout\":\"PT30M\",\"retry\":{\"maxRetries\":1,\"backoff\":\"PT5S\"}}]",
+                "[]");
+
+        assertThat(result).contains("gatherWood").contains("defined");
+        verify(routineService).define(eq("gatherWood"), anyString(), anyString(), any());
+    }
+
+    @Test
+    void defineRoutine_shouldReturnError_whenDefineFails() {
+        when(routineService.define(anyString(), anyString(), anyString(), any()))
+                .thenThrow(new IllegalArgumentException("Routine already exists: returnHome"));
+
+        String result = tools.defineRoutine("returnHome", "desc", "[]", "[]");
+
+        assertThat(result).contains("Failed to define routine");
+    }
+
+    @Test
+    void listRoutines_shouldReturnFormattedList_whenRoutinesPresent() {
+        RoutineDefinition r1 = new RoutineDefinition("mineUntilFull", "Mine until full", "[]", "[]", true);
+        RoutineDefinition r2 = new RoutineDefinition("returnHome", "Navigate home", "[]", "[]", true);
+        when(routineService.listAll()).thenReturn(List.of(r1, r2));
+
+        String result = tools.listRoutines();
+
+        assertThat(result).contains("mineUntilFull").contains("Mine until full");
+        assertThat(result).contains("returnHome").contains("Navigate home");
+    }
+
+    @Test
+    void listRoutines_shouldReturnNoneMessage_whenEmpty() {
+        when(routineService.listAll()).thenReturn(List.of());
+
+        String result = tools.listRoutines();
+
+        assertThat(result).isEqualTo("No routines defined.");
     }
 }

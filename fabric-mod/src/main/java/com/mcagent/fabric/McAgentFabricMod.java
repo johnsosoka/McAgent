@@ -3,6 +3,8 @@ package com.mcagent.fabric;
 import com.mcagent.core.CoreApplication;
 import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.config.EnvLoader;
+import com.mcagent.core.routine.AutoModeDriver;
+import com.mcagent.core.routine.RoutineService;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
@@ -192,6 +194,8 @@ public class McAgentFabricMod implements ClientModInitializer {
             RunLog runLog = springContext.getBean(RunLog.class);
             SurvivalReflexes survivalReflexes = springContext.getBean(SurvivalReflexes.class);
             TaskExecutor taskExecutor = springContext.getBean(TaskExecutor.class);
+            AutoModeDriver autoModeDriver = springContext.getBean(AutoModeDriver.class);
+            RoutineService routineService = springContext.getBean(RoutineService.class);
             autonomousObserver = new AutonomousObserver(
                     botOps, botEventQueue, botProperties.getObservation(),
                     jobTracker, counters, runLog, botOps,
@@ -207,7 +211,9 @@ public class McAgentFabricMod implements ClientModInitializer {
                     survivalReflexes,
                     botProperties,
                     taskExecutor,
-                    botOps);
+                    botOps,
+                    autoModeDriver,
+                    routineService);
 
             PendingApprovalStore pendingApprovalStore = springContext.getBean(PendingApprovalStore.class);
             chatHandler = new FabricChatHandler(botEventQueue, autonomousObserver, botOps, jobTracker, counters,

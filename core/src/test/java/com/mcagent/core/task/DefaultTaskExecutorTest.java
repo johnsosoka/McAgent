@@ -299,7 +299,7 @@ class DefaultTaskExecutorTest {
         private java.util.function.Consumer<TaskSnapshot> onUpdate;
 
         FakeJobSupervisor() {
-            super(null, null, null, null, null);
+            super(null, null, null, null, null, new com.mcagent.core.config.BotProperties());
         }
 
         @Override

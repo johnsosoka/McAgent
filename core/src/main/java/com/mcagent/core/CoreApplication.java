@@ -10,6 +10,9 @@ import com.mcagent.core.config.VectorStoreProperties;
 import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.PlayerNoteService;
 import com.mcagent.core.memory.VectorMemoryService;
+import com.mcagent.core.routine.AutoModeDriver;
+import com.mcagent.core.routine.DefaultRoutineService;
+import com.mcagent.core.routine.RoutineSeeder;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.core.service.SafetyValidator;
@@ -56,7 +59,10 @@ import org.springframework.context.annotation.Import;
         DefaultTaskExecutor.class,
         SessionResumer.class,
         PendingApprovalStore.class,
-        PlanApprovalGate.class
+        PlanApprovalGate.class,
+        DefaultRoutineService.class,
+        RoutineSeeder.class,
+        AutoModeDriver.class
 })
 public class CoreApplication {
     // Intentionally empty — @Import defines the context

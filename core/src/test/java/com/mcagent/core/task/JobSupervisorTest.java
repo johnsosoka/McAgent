@@ -1,8 +1,11 @@
 package com.mcagent.core.task;
 
+import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
+import com.mcagent.core.service.FailureDecision;
 import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.task.TaskFailure;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
@@ -55,7 +58,11 @@ class JobSupervisorTest {
         when(repository.findById(any())).thenReturn(Optional.empty());
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog);
+        // Default escalation response: ABANDON — keeps existing tests that expect FAILED state working.
+        when(langChainService.processFailureEscalation(any(TaskFailure.class)))
+                .thenReturn(new FailureDecision("Test default: abandon.", FailureDecision.ABANDON, null));
+
+        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog, new BotProperties());
         supervisor.start();
     }
 

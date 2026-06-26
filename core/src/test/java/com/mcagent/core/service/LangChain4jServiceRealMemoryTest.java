@@ -56,7 +56,7 @@ class LangChain4jServiceRealMemoryTest {
 
         BotOperations fakeBotOps = mock(BotOperations.class);
         // processUrgentObservation does not call bot; no stubbing required
-        LangChain4jService svc = new LangChain4jService(recordingAssistant, realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
+        LangChain4jService svc = new LangChain4jService(recordingAssistant, mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
 
         svc.processUrgentObservation("Creeper detected 8 blocks away");
 
@@ -80,7 +80,7 @@ class LangChain4jServiceRealMemoryTest {
     void addFrameworkContext_wrapsInFrameworkTags() {
         LayeredChatMemory realMemory = buildRealMemory();
         BotOperations fakeBotOps = mock(BotOperations.class);
-        LangChain4jService svc = new LangChain4jService(msg -> "ok", realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
+        LangChain4jService svc = new LangChain4jService(msg -> "ok", mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
 
         svc.addFrameworkContext("Arrived at destination.");
 
@@ -128,7 +128,7 @@ class LangChain4jServiceRealMemoryTest {
         when(fakeBotOps.getPlayerPosition(org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(Optional.empty());
 
-        LangChain4jService svc = new LangChain4jService(recordingAssistant, realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
+        LangChain4jService svc = new LangChain4jService(recordingAssistant, mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
 
         ExecutorService pool = Executors.newFixedThreadPool(threadCount * 2);
         CountDownLatch startGate = new CountDownLatch(1);

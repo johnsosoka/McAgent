@@ -37,6 +37,13 @@ bot:
     health-critical-pct: 30
     flee-distance: 16
     dark-light-threshold: 7
+  routine:
+    # AutoModeDriver: set to false to disable autonomous routine selection in AUTO mode.
+    auto-driver-enabled: true
+    # Default base coordinates used by returnHome and nightShelter when invoked autonomously.
+    base-x: 0
+    base-y: 64
+    base-z: 0
 
 llm:
   primary-provider: fireworks
