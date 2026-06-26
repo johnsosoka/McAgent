@@ -1,6 +1,9 @@
 package com.mcagent.core.task;
 
 import com.mcagent.core.config.BotProperties;
+import com.mcagent.core.memory.episodic.AgentEvent;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.FailureDecision;
@@ -62,7 +65,20 @@ class JobSupervisorTest {
         when(langChainService.processFailureEscalation(any(TaskFailure.class)))
                 .thenReturn(new FailureDecision("Test default: abandon.", FailureDecision.ABANDON, null));
 
-        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog, new BotProperties());
+        EpisodicMemoryService noOpEpisodic = new EpisodicMemoryService() {
+            @Override
+            public void write(String type, String content, String sessionId,
+                              java.util.Optional<String> relatedTaskId) {}
+            @Override
+            public java.util.List<AgentEvent> retrieve(String queryContext, String sessionId, int topK) {
+                return java.util.List.of();
+            }
+        };
+        SessionContext sessionContext = new SessionContext();
+        sessionContext.setSessionId("test-session");
+
+        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog,
+                new BotProperties(), noOpEpisodic, sessionContext);
         supervisor.start();
     }
 

@@ -3,6 +3,7 @@ package com.mcagent.fabric;
 import com.mcagent.core.CoreApplication;
 import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.config.EnvLoader;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.routine.AutoModeDriver;
 import com.mcagent.core.routine.RoutineService;
 import com.mcagent.core.service.BotOperations;
@@ -220,9 +221,10 @@ public class McAgentFabricMod implements ClientModInitializer {
                     runLog, taskExecutor, pendingApprovalStore);
             botEventQueue.start(langChainService);
 
-            // Wire the current server address into the task executor for session scoping.
+            // Wire the current server address into the task executor and session context for session scoping.
             String serverAddress = resolveServerAddress();
             ((DefaultTaskExecutor) taskExecutor).setServerAddress(serverAddress);
+            springContext.getBean(SessionContext.class).setSessionId(serverAddress);
 
             // Attempt to resume a plan interrupted by a recent disconnect.
             SessionResumer sessionResumer = springContext.getBean(SessionResumer.class);

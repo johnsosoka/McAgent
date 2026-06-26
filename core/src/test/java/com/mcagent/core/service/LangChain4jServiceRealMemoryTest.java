@@ -2,6 +2,8 @@ package com.mcagent.core.service;
 
 import com.mcagent.core.memory.chat.LayeredChatMemory;
 import com.mcagent.core.memory.chat.RollingSummaryService;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.RunLog;
 import dev.langchain4j.data.message.ChatMessage;
@@ -56,7 +58,7 @@ class LangChain4jServiceRealMemoryTest {
 
         BotOperations fakeBotOps = mock(BotOperations.class);
         // processUrgentObservation does not call bot; no stubbing required
-        LangChain4jService svc = new LangChain4jService(recordingAssistant, mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
+        LangChain4jService svc = new LangChain4jService(recordingAssistant, mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog(), noOpEpisodicMemory(), noOpSessionContext());
 
         svc.processUrgentObservation("Creeper detected 8 blocks away");
 
@@ -80,7 +82,7 @@ class LangChain4jServiceRealMemoryTest {
     void addFrameworkContext_wrapsInFrameworkTags() {
         LayeredChatMemory realMemory = buildRealMemory();
         BotOperations fakeBotOps = mock(BotOperations.class);
-        LangChain4jService svc = new LangChain4jService(msg -> "ok", mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
+        LangChain4jService svc = new LangChain4jService(msg -> "ok", mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog(), noOpEpisodicMemory(), noOpSessionContext());
 
         svc.addFrameworkContext("Arrived at destination.");
 
@@ -128,7 +130,7 @@ class LangChain4jServiceRealMemoryTest {
         when(fakeBotOps.getPlayerPosition(org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(Optional.empty());
 
-        LangChain4jService svc = new LangChain4jService(recordingAssistant, mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog());
+        LangChain4jService svc = new LangChain4jService(recordingAssistant, mock(PlanFailureExplainer.class), realMemory, fakeBotOps, noOpCounters(), noOpRunLog(), noOpEpisodicMemory(), noOpSessionContext());
 
         ExecutorService pool = Executors.newFixedThreadPool(threadCount * 2);
         CountDownLatch startGate = new CountDownLatch(1);
@@ -205,6 +207,24 @@ class LangChain4jServiceRealMemoryTest {
             }
         };
         return new RollingSummaryService(noOpModel, 800);
+    }
+
+    private static EpisodicMemoryService noOpEpisodicMemory() {
+        return new EpisodicMemoryService() {
+            @Override
+            public void write(String type, String content, String sessionId, java.util.Optional<String> relatedTaskId) {}
+
+            @Override
+            public java.util.List<com.mcagent.core.memory.episodic.AgentEvent> retrieve(String queryContext, String sessionId, int topK) {
+                return java.util.List.of();
+            }
+        };
+    }
+
+    private static SessionContext noOpSessionContext() {
+        SessionContext ctx = new SessionContext();
+        ctx.setSessionId("test-session");
+        return ctx;
     }
 
     private static void awaitQuietly(CountDownLatch latch) {

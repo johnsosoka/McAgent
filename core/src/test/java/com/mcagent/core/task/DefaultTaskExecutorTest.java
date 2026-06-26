@@ -1,5 +1,8 @@
 package com.mcagent.core.task;
 
+import com.mcagent.core.memory.episodic.AgentEvent;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.RunLog;
@@ -299,7 +302,26 @@ class DefaultTaskExecutorTest {
         private java.util.function.Consumer<TaskSnapshot> onUpdate;
 
         FakeJobSupervisor() {
-            super(null, null, null, null, null, new com.mcagent.core.config.BotProperties());
+            super(null, null, null, null, null, new com.mcagent.core.config.BotProperties(),
+                    noOpEpisodic(), noOpSessionCtx());
+        }
+
+        private static EpisodicMemoryService noOpEpisodic() {
+            return new EpisodicMemoryService() {
+                @Override
+                public void write(String type, String content, String sessionId,
+                                  java.util.Optional<String> relatedTaskId) {}
+                @Override
+                public java.util.List<AgentEvent> retrieve(String queryContext, String sessionId, int topK) {
+                    return java.util.List.of();
+                }
+            };
+        }
+
+        private static SessionContext noOpSessionCtx() {
+            SessionContext ctx = new SessionContext();
+            ctx.setSessionId("test-session");
+            return ctx;
         }
 
         @Override

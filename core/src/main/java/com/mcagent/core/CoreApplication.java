@@ -10,6 +10,8 @@ import com.mcagent.core.config.VectorStoreProperties;
 import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.PlayerNoteService;
 import com.mcagent.core.memory.VectorMemoryService;
+import com.mcagent.core.memory.episodic.DefaultEpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.routine.AutoModeDriver;
 import com.mcagent.core.routine.DefaultRoutineService;
 import com.mcagent.core.routine.RoutineSeeder;
@@ -55,6 +57,8 @@ import org.springframework.context.annotation.Import;
         LocationMemoryService.class,
         PlayerNoteService.class,
         VectorMemoryService.class,
+        SessionContext.class,
+        DefaultEpisodicMemoryService.class,
         JobSupervisor.class,
         DefaultTaskExecutor.class,
         SessionResumer.class,

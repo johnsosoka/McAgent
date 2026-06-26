@@ -1,6 +1,8 @@
 package com.mcagent.core.task;
 
 import com.mcagent.core.config.BotProperties;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.FailureDecision;
@@ -67,7 +69,21 @@ class JobSupervisorConcurrencyTest {
         when(repository.save(org.mockito.ArgumentMatchers.<SessionState>any()))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog, new BotProperties());
+        EpisodicMemoryService noOpEpisodic = new EpisodicMemoryService() {
+            @Override
+            public void write(String type, String content, String sessionId,
+                              java.util.Optional<String> relatedTaskId) {}
+            @Override
+            public java.util.List<com.mcagent.core.memory.episodic.AgentEvent> retrieve(
+                    String queryContext, String sessionId, int topK) {
+                return java.util.List.of();
+            }
+        };
+        SessionContext sessionContext = new SessionContext();
+        sessionContext.setSessionId("test-session");
+
+        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog,
+                new BotProperties(), noOpEpisodic, sessionContext);
         supervisor.start();
     }
 
@@ -373,7 +389,20 @@ class JobSupervisorConcurrencyTest {
         props.getPlan().setMaxEscalationsPerPlan(1);
 
         supervisor.stop();
-        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog, props);
+        EpisodicMemoryService noOpEpisodic2 = new EpisodicMemoryService() {
+            @Override
+            public void write(String type, String content, String sessionId,
+                              java.util.Optional<String> relatedTaskId) {}
+            @Override
+            public java.util.List<com.mcagent.core.memory.episodic.AgentEvent> retrieve(
+                    String queryContext, String sessionId, int topK) {
+                return java.util.List.of();
+            }
+        };
+        SessionContext sessionContext2 = new SessionContext();
+        sessionContext2.setSessionId("test-session");
+        supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog,
+                props, noOpEpisodic2, sessionContext2);
         supervisor.start();
 
         // Step always fails immediately (navigateTo returns failure).

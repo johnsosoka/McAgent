@@ -22,6 +22,7 @@ public class BotProperties {
     private JobProperties job = new JobProperties();
     private PlanProperties plan = new PlanProperties();
     private RoutineProperties routine = new RoutineProperties();
+    private MemoryProperties memory = new MemoryProperties();
 
     @Data
     public static class ChatProperties {
@@ -280,6 +281,38 @@ public class BotProperties {
 
         /** Default base Z coordinate for base-navigation routines. */
         private int baseZ = 0;
+    }
+
+    /**
+     * Configuration for the episodic memory subsystem ({@link com.mcagent.core.memory.episodic.DefaultEpisodicMemoryService}).
+     */
+    @Data
+    public static class MemoryProperties {
+
+        /**
+         * Master switch for episodic memory. When false, writes and retrieves are no-ops.
+         */
+        private boolean episodicEnabled = true;
+
+        /**
+         * How many events to inject above each {@code Assistant.chat} call.
+         * Default: 3 (Generative Agents baseline).
+         */
+        private int retrieveTopK = 3;
+
+        /**
+         * Half-life (in hours) for the recency exponential decay.
+         * At {@code decayHours} hours of age, an event's recency contribution halves.
+         * Default: 8 hours.
+         */
+        private double recencyDecayHours = 8.0;
+
+        /**
+         * Cap on how many events are loaded from the DB to score at retrieval time.
+         * Pruning beyond this cap is deferred to a future polish task.
+         * Default: 5000.
+         */
+        private int maxStoredEventsPerSession = 5000;
     }
 
     /**

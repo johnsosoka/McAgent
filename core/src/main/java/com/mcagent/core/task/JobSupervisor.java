@@ -1,6 +1,9 @@
 package com.mcagent.core.task;
 
 import com.mcagent.core.config.BotProperties;
+import com.mcagent.core.memory.episodic.AgentEvent;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.FailureDecision;
 import com.mcagent.core.service.LangChain4jService;
@@ -67,6 +70,8 @@ public class JobSupervisor {
     private final Counters counters;
     private final RunLog runLog;
     private final BotProperties botProperties;
+    private final EpisodicMemoryService episodicMemoryService;
+    private final SessionContext sessionContext;
 
     private ExecutorService executor;
     private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
@@ -253,6 +258,10 @@ public class JobSupervisor {
             runLog.log("plan_completed", Map.of("planId", plan.id().toString()));
             publishFramework("[task:" + plan.summary() + "] completed (" + steps.size() + " steps)");
             jobTracker.clearJob();
+            writeEpisodicEvent(
+                    AgentEvent.TYPE_PLAN_COMPLETE,
+                    plan.summary() + " completed in " + Duration.between(planStart, Instant.now()).toSeconds() + "s",
+                    plan.id().toString());
 
         } catch (Throwable t) {
             log.error("JobSupervisor crashed unexpectedly", t);
@@ -404,6 +413,10 @@ public class JobSupervisor {
                 "planId", plan.id().toString(),
                 "step", stepIndex,
                 "reason", reason));
+        writeEpisodicEvent(
+                AgentEvent.TYPE_PLAN_FAIL,
+                plan.summary() + " failed at step " + (stepIndex + 1) + ": " + reason,
+                plan.id().toString());
     }
 
     /** Send the explanation to the player via framework context and outbound chat. */
@@ -603,6 +616,19 @@ public class JobSupervisor {
             langChainService.addFrameworkContext(message);
         } catch (Exception e) {
             log.warn("JobSupervisor: failed to publish framework message: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Write an episodic memory event, swallowing any errors so a memory failure
+     * never disrupts plan execution.
+     */
+    private void writeEpisodicEvent(String type, String content, String relatedTaskId) {
+        try {
+            episodicMemoryService.write(type, content, sessionContext.getSessionId(),
+                    Optional.of(relatedTaskId));
+        } catch (Exception e) {
+            log.warn("JobSupervisor: failed to write episodic event type={}: {}", type, e.getMessage());
         }
     }
 

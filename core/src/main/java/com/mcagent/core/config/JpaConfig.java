@@ -19,7 +19,8 @@ import java.util.Properties;
  * Spring Boot auto-configuration is avoided to prevent classpath scanning issues.
  */
 @Configuration
-@EnableJpaRepositories(basePackages = {"com.mcagent.core.memory", "com.mcagent.core.task", "com.mcagent.core.routine"})
+@EnableJpaRepositories(basePackages = {"com.mcagent.core.memory", "com.mcagent.core.task", "com.mcagent.core.routine",
+        "com.mcagent.core.memory.episodic"})
 public class JpaConfig {
 
     @Bean
@@ -42,7 +43,8 @@ public class JpaConfig {
     public LocalContainerEntityManagerFactoryBean entityManagerFactory(DataSource dataSource) {
         LocalContainerEntityManagerFactoryBean emf = new LocalContainerEntityManagerFactoryBean();
         emf.setDataSource(dataSource);
-        emf.setPackagesToScan("com.mcagent.core.memory", "com.mcagent.core.task", "com.mcagent.core.routine");
+        emf.setPackagesToScan("com.mcagent.core.memory", "com.mcagent.core.task", "com.mcagent.core.routine",
+                "com.mcagent.core.memory.episodic");
         emf.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
 
         Properties jpaProperties = new Properties();

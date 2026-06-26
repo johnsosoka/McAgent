@@ -44,6 +44,12 @@ bot:
     base-x: 0
     base-y: 64
     base-z: 0
+  memory:
+    # Episodic memory (Generative Agents three-factor retrieval).
+    episodic-enabled: true
+    retrieve-top-k: 3
+    recency-decay-hours: 8.0
+    max-stored-events-per-session: 5000
 
 llm:
   primary-provider: fireworks

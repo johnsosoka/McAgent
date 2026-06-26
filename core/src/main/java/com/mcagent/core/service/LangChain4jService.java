@@ -1,6 +1,9 @@
 package com.mcagent.core.service;
 
 import com.mcagent.core.memory.chat.LayeredChatMemory;
+import com.mcagent.core.memory.episodic.AgentEvent;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.task.TaskFailure;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.RunLog;
@@ -10,7 +13,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Central service that processes player input through the LLM pipeline.
@@ -33,12 +41,17 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class LangChain4jService {
 
+    private static final DateTimeFormatter MEMORY_TS_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'").withZone(ZoneOffset.UTC);
+
     private final Assistant assistant;
     private final PlanFailureExplainer failureExplainer;
     private final ChatMemory chatMemory;
     private final BotOperations bot;
     private final Counters counters;
     private final RunLog runLog;
+    private final EpisodicMemoryService episodicMemoryService;
+    private final SessionContext sessionContext;
 
     /**
      * Process player input through the LLM.
@@ -56,6 +69,7 @@ public class LangChain4jService {
         long start = System.currentTimeMillis();
         try {
             synchronized (chatMemory) {
+                injectEpisodicMemoriesUnsafe(playerMessage);
                 injectPlayerContextUnsafe(playerId);
                 String response = assistant.chat(playerMessage);
                 long durationMs = System.currentTimeMillis() - start;
@@ -65,6 +79,10 @@ public class LangChain4jService {
                         "player", playerId,
                         "message_len", playerMessage.length(),
                         "duration_ms", durationMs));
+                // Write the player command as an episodic event after a successful LLM call.
+                episodicMemoryService.write(
+                        AgentEvent.TYPE_COMMAND, playerMessage,
+                        sessionContext.getSessionId(), Optional.empty());
                 return response;
             }
         } catch (Exception e) {
@@ -189,6 +207,39 @@ public class LangChain4jService {
      */
     void addFrameworkContextUnsafe(String message) {
         chatMemory.add(UserMessage.from("<framework>" + message + "</framework>"));
+    }
+
+    /**
+     * Retrieves the top-K episodic memories relevant to the player's message and
+     * injects them as a {@code <memories>} framework message BEFORE the player
+     * context and the LLM call. Callers must hold {@code synchronized (chatMemory)}.
+     *
+     * <p>No-op when there are no stored memories or when episodic memory is disabled.</p>
+     */
+    private void injectEpisodicMemoriesUnsafe(String playerMessage) {
+        try {
+            List<AgentEvent> memories = episodicMemoryService.retrieve(
+                    playerMessage, sessionContext.getSessionId(), 3);
+            if (memories.isEmpty()) {
+                return;
+            }
+            StringBuilder sb = new StringBuilder("<memories>\nRelevant past events:\n");
+            for (AgentEvent mem : memories) {
+                sb.append("- ")
+                  .append(MEMORY_TS_FMT.format(mem.getCreatedAt()))
+                  .append(": ")
+                  .append(mem.getType())
+                  .append(": \"")
+                  .append(mem.getContent())
+                  .append("\"\n");
+            }
+            sb.append("</memories>");
+            addFrameworkContextUnsafe(sb.toString());
+            log.debug("Injected {} episodic memories for context", memories.size());
+        } catch (Exception e) {
+            // Memory retrieval must never disrupt normal LLM flow.
+            log.warn("Failed to inject episodic memories: {}", e.getMessage());
+        }
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.mcagent.core.service;
 
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.task.TaskFailure;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.RunLog;
@@ -10,12 +12,17 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,8 +55,23 @@ class LangChain4jServiceTest {
     @Mock
     private RunLog runLog;
 
+    @Mock
+    private EpisodicMemoryService episodicMemoryService;
+
+    @Mock
+    private SessionContext sessionContext;
+
     @InjectMocks
     private LangChain4jService service;
+
+    @BeforeEach
+    void setUpEpisodicDefaults() {
+        // Default: no stored memories so retrieval doesn't inject a <memories> block.
+        // Tests that verify memory injection set their own stubs.
+        lenient().when(episodicMemoryService.retrieve(anyString(), anyString(), anyInt()))
+                .thenReturn(List.of());
+        lenient().when(sessionContext.getSessionId()).thenReturn("test-session");
+    }
 
     @Test
     void shouldReturnResponseOnSuccess() {
@@ -166,6 +188,79 @@ class LangChain4jServiceTest {
         service.processFailureEscalation(sampleFailure());
 
         verify(counters).inc("llm.failure_explain.errors");
+    }
+
+    // -------------------------------------------------------------------------
+    // Episodic memory integration tests
+    // -------------------------------------------------------------------------
+
+    @Test
+    void processInput_injectsMemoriesFrameworkMessage_whenMemoriesPresent() {
+        com.mcagent.core.memory.episodic.AgentEvent mem =
+                new com.mcagent.core.memory.episodic.AgentEvent(
+                        "plan_complete", "mine 64 iron completed in 720s", 7,
+                        java.time.Instant.parse("2025-06-15T10:00:00Z"),
+                        "test-session", "[]", null);
+        when(episodicMemoryService.retrieve("mine iron", "test-session", 3))
+                .thenReturn(List.of(mem));
+        when(bot.getPlayerPosition("p")).thenReturn(java.util.Optional.empty());
+        when(assistant.chat("mine iron")).thenReturn("ok");
+
+        service.processInput("mine iron", "p");
+
+        // A <memories>...</memories> framework message should be injected before player context.
+        // We verify via chatMemory.add(ChatMessage) — the single-message overload.
+        verify(chatMemory, org.mockito.Mockito.atLeast(1)).add(
+                (dev.langchain4j.data.message.ChatMessage) org.mockito.ArgumentMatchers.argThat(msg -> {
+                    if (msg instanceof dev.langchain4j.data.message.UserMessage um) {
+                        return um.singleText().contains("<memories>")
+                                && um.singleText().contains("plan_complete")
+                                && um.singleText().contains("mine 64 iron completed");
+                    }
+                    return false;
+                }));
+    }
+
+    @Test
+    void processInput_doesNotInjectMemories_whenNoneRetrieved() {
+        when(episodicMemoryService.retrieve(anyString(), anyString(), anyInt())).thenReturn(List.of());
+        when(bot.getPlayerPosition("p")).thenReturn(java.util.Optional.empty());
+        when(assistant.chat("hi")).thenReturn("ok");
+
+        service.processInput("hi", "p");
+
+        // Only the player_context message should be injected — never a <memories> block.
+        verify(chatMemory, org.mockito.Mockito.never()).add(
+                (dev.langchain4j.data.message.ChatMessage) org.mockito.ArgumentMatchers.argThat(msg -> {
+                    if (msg instanceof dev.langchain4j.data.message.UserMessage um) {
+                        return um.singleText().contains("<memories>");
+                    }
+                    return false;
+                }));
+    }
+
+    @Test
+    void processInput_writesCommandEvent_afterSuccessfulLlmCall() {
+        when(bot.getPlayerPosition("p")).thenReturn(java.util.Optional.empty());
+        when(assistant.chat("mine iron")).thenReturn("ok");
+
+        service.processInput("mine iron", "p");
+
+        verify(episodicMemoryService).write(
+                org.mockito.ArgumentMatchers.eq("command"),
+                org.mockito.ArgumentMatchers.eq("mine iron"),
+                org.mockito.ArgumentMatchers.eq("test-session"),
+                any());
+    }
+
+    @Test
+    void processInput_doesNotWriteCommandEvent_onLlmFailure() {
+        when(bot.getPlayerPosition("p")).thenReturn(java.util.Optional.empty());
+        when(assistant.chat("bad")).thenThrow(new RuntimeException("LLM failure"));
+
+        service.processInput("bad", "p");
+
+        verify(episodicMemoryService, org.mockito.Mockito.never()).write(anyString(), anyString(), anyString(), any());
     }
 
     // -------------------------------------------------------------------------
