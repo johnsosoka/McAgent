@@ -71,19 +71,29 @@ public class DefaultEpisodicMemoryService implements EpisodicMemoryService {
             log.debug("Episodic memory disabled — skipping write for type={}", type);
             return;
         }
+        writeWithImportance(type, content, sessionId, relatedTaskId, scoreImportance(content));
+    }
 
+    @Override
+    public void writeWithImportance(String type, String content, String sessionId,
+                                    Optional<String> relatedTaskId, int importance) {
+        if (!botProps.getMemory().isEpisodicEnabled()) {
+            log.debug("Episodic memory disabled — skipping write for type={}", type);
+            return;
+        }
+
+        int clamped = Math.max(1, Math.min(10, importance));
         try {
             float[] vector = embed(content);
-            int importance = scoreImportance(content);
             String embeddingJson = EmbeddingSerializer.toJson(vector);
 
             AgentEvent event = new AgentEvent(
-                    type, content, importance, Instant.now(),
+                    type, content, clamped, Instant.now(),
                     sessionId, embeddingJson,
                     relatedTaskId.orElse(null));
 
             repository.save(event);
-            log.debug("Episodic event written: type={} importance={} session={}", type, importance, sessionId);
+            log.debug("Episodic event written: type={} importance={} session={}", type, clamped, sessionId);
         } catch (Exception e) {
             // Memory writes must never crash the calling thread.
             log.warn("Failed to write episodic event type={}: {}", type, e.getMessage());

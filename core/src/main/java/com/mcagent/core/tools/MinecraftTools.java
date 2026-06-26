@@ -6,6 +6,8 @@ import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.LocationType;
 import com.mcagent.core.memory.PlayerNoteService;
 import com.mcagent.core.memory.VectorMemoryService;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.model.BotAction;
 import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PlayerInfo;
@@ -161,6 +163,8 @@ public class MinecraftTools {
     private final PlanApprovalGate approvalGate;
     private final PendingApprovalStore pendingApprovalStore;
     private final RoutineService routineService;
+    private final EpisodicMemoryService episodicMemoryService;
+    private final SessionContext sessionContext;
 
     /**
      * Injected lazily to break the {@code MinecraftTools → LangChain4jService → Assistant → MinecraftTools}
@@ -944,6 +948,44 @@ public class MinecraftTools {
                     .map(r -> r.getName() + " — " + r.getDescription())
                     .collect(Collectors.joining("\n"));
         });
+    }
+
+    // -------------------------------------------------------------------------
+    // Correction memory (Sprint 15 Q4)
+    // -------------------------------------------------------------------------
+
+    @Tool("Remember a player correction. Call this when the player corrects, disagrees, or expresses " +
+          "dissatisfaction with an action. Captures what was wrong and what should happen instead " +
+          "so future tasks can avoid the same mistake.")
+    public String rememberCorrection(
+            @P("Player name") String player,
+            @P("What you were doing when corrected (short context)") String context,
+            @P("What was wrong (the player's words)") String wrongAction,
+            @P("What should happen instead (the corrected behavior)") String correctApproach) {
+        log.info("Tool: rememberCorrection({}, ...)", player);
+        return withToolScope("rememberCorrection", new NoOp(), () -> {
+            String content = String.format(
+                    "Player %s corrected: while %s, %s. Correct approach: %s",
+                    player, context, wrongAction, correctApproach);
+            episodicMemoryService.writeWithImportance(
+                    "correction", content, sessionContext.getSessionId(), Optional.empty(), 9);
+            counters.inc("memory.corrections");
+            runLog.log("correction_saved", Map.of(
+                    "player", player,
+                    "wrong", wrongAction,
+                    "correct", correctApproach));
+            return "Noted. I'll remember not to " + shorten(wrongAction, 80) + ".";
+        });
+    }
+
+    /**
+     * Truncate a string to {@code maxLen} characters, appending {@code "…"} if trimmed.
+     */
+    private static String shorten(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "…";
     }
 
     /**

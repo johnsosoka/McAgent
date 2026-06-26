@@ -278,6 +278,48 @@ class DefaultEpisodicMemoryServiceTest {
                 "server-1", EmbeddingSerializer.toJson(vec), null);
     }
 
+    // -------------------------------------------------------------------------
+    // writeWithImportance tests (Sprint 15 Q4)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void writeWithImportance_skipsLLMScoring() {
+        // Arrange: provide embedding but do NOT stub chatModel (it must never be called).
+        stubEmbedding(new float[]{0.5f, 0.5f});
+
+        // Act: use the explicit-importance overload (simulates correction writes).
+        service.writeWithImportance("correction", "Player corrected: don't put torches on dirt",
+                "server-1", Optional.empty(), 9);
+
+        // Assert: event persisted with exact importance — chatModel never consulted.
+        verify(repository).save(argThat(event ->
+                "correction".equals(event.getType())
+                && event.getImportance() == 9));
+        verify(chatModel, never()).chat(anyString());
+    }
+
+    @Test
+    void writeWithImportance_clampsImportanceToValidRange() {
+        stubEmbedding(new float[]{1.0f});
+
+        service.writeWithImportance("correction", "important", "server-1", Optional.empty(), 15);
+
+        verify(repository).save(argThat(event -> event.getImportance() == 10));
+    }
+
+    @Test
+    void writeWithImportance_isNoOp_whenEpisodicDisabled() {
+        botProperties.getMemory().setEpisodicEnabled(false);
+
+        service.writeWithImportance("correction", "content", "server-1", Optional.empty(), 9);
+
+        verifyNoInteractions(repository, embeddingModel, chatModel);
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
     private void stubEmbedding(float[] vector) {
         Embedding embedding = Embedding.from(vector);
         when(embeddingModel.embed(anyString()))

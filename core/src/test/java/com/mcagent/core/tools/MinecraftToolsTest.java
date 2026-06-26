@@ -3,6 +3,8 @@ package com.mcagent.core.tools;
 import com.mcagent.core.memory.LocationMemoryService;
 import com.mcagent.core.memory.PlayerNoteService;
 import com.mcagent.core.memory.VectorMemoryService;
+import com.mcagent.core.memory.episodic.EpisodicMemoryService;
+import com.mcagent.core.memory.episodic.SessionContext;
 import com.mcagent.core.model.EntityInfo;
 import com.mcagent.core.model.PathResult;
 import com.mcagent.core.model.PlayerInfo;
@@ -63,6 +65,8 @@ class MinecraftToolsTest {
     private PlanApprovalGate approvalGate;
     private PendingApprovalStore pendingApprovalStore;
     private RoutineService routineService;
+    private EpisodicMemoryService episodicMemoryService;
+    private SessionContext sessionContext;
     private MinecraftTools tools;
 
     @BeforeEach
@@ -82,6 +86,9 @@ class MinecraftToolsTest {
         approvalGate = mock(PlanApprovalGate.class);
         pendingApprovalStore = mock(PendingApprovalStore.class);
         routineService = mock(RoutineService.class);
+        episodicMemoryService = mock(EpisodicMemoryService.class);
+        sessionContext = mock(SessionContext.class);
+        when(sessionContext.getSessionId()).thenReturn("test-session");
         // Default: all actions approved
         when(safetyValidator.validate(any(), anyInt()))
                 .thenReturn(SafetyValidator.ValidationResult.approved());
@@ -90,7 +97,8 @@ class MinecraftToolsTest {
         when(approvalGate.requiresApproval(any())).thenReturn(false);
         tools = new MinecraftTools(bot, locationMemory, vectorMemory, playerNoteService, chatService,
                 safetyValidator, jobTracker, counters, runLog, taskExecutor, planner,
-                approvalGate, pendingApprovalStore, routineService);
+                approvalGate, pendingApprovalStore, routineService,
+                episodicMemoryService, sessionContext);
         tools.setLangChain4jService(langChain4jService);
     }
 
@@ -1219,5 +1227,30 @@ class MinecraftToolsTest {
         String result = tools.listRoutines();
 
         assertThat(result).isEqualTo("No routines defined.");
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 15 Q4 — rememberCorrection tool
+    // -------------------------------------------------------------------------
+
+    @Test
+    void rememberCorrection_writesEpisodicEvent_withTypeAndForcedImportance() {
+        tools.rememberCorrection("Steve", "placing torches", "don't put torches on dirt",
+                "place torches on stone or walls only");
+
+        verify(episodicMemoryService).writeWithImportance(
+                eq("correction"),
+                contains("Steve"),
+                eq("test-session"),
+                eq(Optional.empty()),
+                eq(9));
+    }
+
+    @Test
+    void rememberCorrection_replyContainsNoted() {
+        String result = tools.rememberCorrection("Steve", "building wall",
+                "stop, that's the wrong location", "build further south");
+
+        assertThat(result).contains("Noted");
     }
 }

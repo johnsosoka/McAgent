@@ -8,6 +8,7 @@ import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.FailureDecision;
 import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.service.ReflectionService;
 import com.mcagent.core.task.TaskFailure;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
@@ -47,6 +48,7 @@ class JobSupervisorTest {
     private Counters counters;
     private RunLog runLog;
     private BotOperations bot;
+    private ReflectionService reflectionService;
     private JobSupervisor supervisor;
 
     @BeforeEach
@@ -57,6 +59,8 @@ class JobSupervisorTest {
         counters = new Counters();
         runLog = mock(RunLog.class);
         bot = mock(BotOperations.class);
+        reflectionService = mock(ReflectionService.class);
+        when(reflectionService.reflect(anyString())).thenReturn("Test reflection text.");
 
         when(repository.findById(any())).thenReturn(Optional.empty());
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -70,6 +74,9 @@ class JobSupervisorTest {
             public void write(String type, String content, String sessionId,
                               java.util.Optional<String> relatedTaskId) {}
             @Override
+            public void writeWithImportance(String type, String content, String sessionId,
+                                            java.util.Optional<String> relatedTaskId, int importance) {}
+            @Override
             public java.util.List<AgentEvent> retrieve(String queryContext, String sessionId, int topK) {
                 return java.util.List.of();
             }
@@ -78,7 +85,7 @@ class JobSupervisorTest {
         sessionContext.setSessionId("test-session");
 
         supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog,
-                new BotProperties(), noOpEpisodic, sessionContext);
+                new BotProperties(), noOpEpisodic, sessionContext, reflectionService);
         supervisor.start();
     }
 

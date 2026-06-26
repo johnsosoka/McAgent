@@ -303,7 +303,7 @@ class DefaultTaskExecutorTest {
 
         FakeJobSupervisor() {
             super(null, null, null, null, null, new com.mcagent.core.config.BotProperties(),
-                    noOpEpisodic(), noOpSessionCtx());
+                    noOpEpisodic(), noOpSessionCtx(), noOpReflection());
         }
 
         private static EpisodicMemoryService noOpEpisodic() {
@@ -312,10 +312,17 @@ class DefaultTaskExecutorTest {
                 public void write(String type, String content, String sessionId,
                                   java.util.Optional<String> relatedTaskId) {}
                 @Override
+                public void writeWithImportance(String type, String content, String sessionId,
+                                                java.util.Optional<String> relatedTaskId, int importance) {}
+                @Override
                 public java.util.List<AgentEvent> retrieve(String queryContext, String sessionId, int topK) {
                     return java.util.List.of();
                 }
             };
+        }
+
+        private static com.mcagent.core.service.ReflectionService noOpReflection() {
+            return taskContext -> "";
         }
 
         private static SessionContext noOpSessionCtx() {

@@ -215,6 +215,10 @@ class LangChain4jServiceRealMemoryTest {
             public void write(String type, String content, String sessionId, java.util.Optional<String> relatedTaskId) {}
 
             @Override
+            public void writeWithImportance(String type, String content, String sessionId,
+                                            java.util.Optional<String> relatedTaskId, int importance) {}
+
+            @Override
             public java.util.List<com.mcagent.core.memory.episodic.AgentEvent> retrieve(String queryContext, String sessionId, int topK) {
                 return java.util.List.of();
             }

@@ -77,6 +77,16 @@ public interface Assistant {
               Bot: "Where? (here, base, or coordinates)"
             </disambiguation_guidance>
 
+            <correction_guidance>
+            When the player corrects you ("that's wrong", "don't do X", "that's not what I meant"),
+            call rememberCorrection(player, context, wrongAction, correctApproach) BEFORE stopping or revising.
+            Always acknowledge the correction briefly.
+            Examples that should trigger rememberCorrection:
+            - "don't put torches on dirt"
+            - "stop, that's the wrong location"
+            - "you keep building too close to my house"
+            </correction_guidance>
+
             <timing_guidance>
             Navigation and follow tools send their own immediate chat confirmation (e.g. "Navigating to (100, 64, 200)").
             Do NOT send a separate "I'm starting to..." message — it may arrive after the bot has already arrived.

@@ -5,6 +5,7 @@ import com.mcagent.core.memory.chat.RollingSummaryService;
 import com.mcagent.core.service.Assistant;
 import com.mcagent.core.service.PlanFailureExplainer;
 import com.mcagent.core.service.Planner;
+import com.mcagent.core.service.ReflectionService;
 import com.mcagent.core.tools.MinecraftTools;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
@@ -96,6 +97,23 @@ public class LangChain4jConfig {
     @Bean
     public PlanFailureExplainer planFailureExplainer(ChatModel chatModel) {
         return AiServices.builder(PlanFailureExplainer.class)
+                .chatModel(chatModel)
+                .build();
+    }
+
+    /**
+     * Stateless reflection role (Reflexion-pattern postmortem writer).
+     *
+     * <p>No memory, no tools — given a task context string, this service produces
+     * a 2-3 sentence plain-text postmortem. Persisted as an episodic memory event
+     * so future planning turns can learn from past outcomes.</p>
+     *
+     * <p>Called by {@link com.mcagent.core.task.JobSupervisor} after a plan reaches
+     * a terminal state (COMPLETED or FAILED). CANCELLED plans are skipped.</p>
+     */
+    @Bean
+    public ReflectionService reflectionService(ChatModel chatModel) {
+        return AiServices.builder(ReflectionService.class)
                 .chatModel(chatModel)
                 .build();
     }

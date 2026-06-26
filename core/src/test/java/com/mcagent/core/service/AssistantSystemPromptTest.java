@@ -59,4 +59,16 @@ class AssistantSystemPromptTest {
                 .as("System prompt must state the two-question maximum rule")
                 .contains("Never ask more than 2");
     }
+
+    @Test
+    void systemPrompt_containsCorrectionGuidance() throws Exception {
+        String systemPrompt = Assistant.class
+                .getMethod("chat", String.class)
+                .getAnnotation(SystemMessage.class)
+                .value()[0];
+
+        assertThat(systemPrompt)
+                .as("System prompt must contain <correction_guidance> block")
+                .contains("<correction_guidance>");
+    }
 }

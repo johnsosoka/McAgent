@@ -7,6 +7,7 @@ import com.mcagent.core.model.PathResult;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.FailureDecision;
 import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.core.service.ReflectionService;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
@@ -74,6 +75,9 @@ class JobSupervisorConcurrencyTest {
             public void write(String type, String content, String sessionId,
                               java.util.Optional<String> relatedTaskId) {}
             @Override
+            public void writeWithImportance(String type, String content, String sessionId,
+                                            java.util.Optional<String> relatedTaskId, int importance) {}
+            @Override
             public java.util.List<com.mcagent.core.memory.episodic.AgentEvent> retrieve(
                     String queryContext, String sessionId, int topK) {
                 return java.util.List.of();
@@ -82,8 +86,11 @@ class JobSupervisorConcurrencyTest {
         SessionContext sessionContext = new SessionContext();
         sessionContext.setSessionId("test-session");
 
+        ReflectionService noOpReflection = mock(ReflectionService.class);
+        when(noOpReflection.reflect(anyString())).thenReturn("Test reflection.");
+
         supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog,
-                new BotProperties(), noOpEpisodic, sessionContext);
+                new BotProperties(), noOpEpisodic, sessionContext, noOpReflection);
         supervisor.start();
     }
 
@@ -394,6 +401,9 @@ class JobSupervisorConcurrencyTest {
             public void write(String type, String content, String sessionId,
                               java.util.Optional<String> relatedTaskId) {}
             @Override
+            public void writeWithImportance(String type, String content, String sessionId,
+                                            java.util.Optional<String> relatedTaskId, int importance) {}
+            @Override
             public java.util.List<com.mcagent.core.memory.episodic.AgentEvent> retrieve(
                     String queryContext, String sessionId, int topK) {
                 return java.util.List.of();
@@ -401,8 +411,10 @@ class JobSupervisorConcurrencyTest {
         };
         SessionContext sessionContext2 = new SessionContext();
         sessionContext2.setSessionId("test-session");
+        ReflectionService noOpReflection2 = mock(ReflectionService.class);
+        when(noOpReflection2.reflect(anyString())).thenReturn("Test reflection.");
         supervisor = new JobSupervisor(langChainService, repository, jobTracker, counters, runLog,
-                props, noOpEpisodic2, sessionContext2);
+                props, noOpEpisodic2, sessionContext2, noOpReflection2);
         supervisor.start();
 
         // Step always fails immediately (navigateTo returns failure).

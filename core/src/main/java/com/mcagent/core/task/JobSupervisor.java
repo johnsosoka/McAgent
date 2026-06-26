@@ -9,6 +9,7 @@ import com.mcagent.core.service.FailureDecision;
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.core.service.PlanDraft;
 import com.mcagent.core.service.PlanFromDraftConverter;
+import com.mcagent.core.service.ReflectionService;
 import com.mcagent.core.telemetry.Counters;
 import com.mcagent.core.telemetry.JobTracker;
 import com.mcagent.core.telemetry.RunLog;
@@ -72,6 +73,7 @@ public class JobSupervisor {
     private final BotProperties botProperties;
     private final EpisodicMemoryService episodicMemoryService;
     private final SessionContext sessionContext;
+    private final ReflectionService reflectionService;
 
     private ExecutorService executor;
     private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
@@ -181,6 +183,7 @@ public class JobSupervisor {
                         runLog.log("plan_failed", Map.of("planId", plan.id().toString(), "reason", reason));
                         publishFramework("[task:" + plan.summary() + "] plan timed out after " + plan.termination().maxDuration());
                         bot.cancel();
+                        persistReflection(plan, TaskState.FAILED, i, steps.size(), elapsed, reason);
                         return;
                     }
                 }
@@ -221,7 +224,7 @@ public class JobSupervisor {
                     EscalationOutcome outcome = handleStepFailure(
                             plan, steps, i, step, reason,
                             escalationCount, maxEscalations,
-                            bot, current, onUpdate);
+                            bot, current, onUpdate, planStart);
                     escalationCount = outcome.newEscalationCount();
 
                     if (outcome.shouldAbort()) {
@@ -252,6 +255,7 @@ public class JobSupervisor {
 
             // All steps completed.
             log.info("JobSupervisor: plan '{}' completed", plan.summary());
+            Duration elapsed = Duration.between(planStart, Instant.now());
             TaskSnapshot completed = withState(current.get(), TaskState.COMPLETED, steps.size() - 1, "done");
             onUpdate.accept(completed);
             counters.inc("plan.completed");
@@ -260,8 +264,9 @@ public class JobSupervisor {
             jobTracker.clearJob();
             writeEpisodicEvent(
                     AgentEvent.TYPE_PLAN_COMPLETE,
-                    plan.summary() + " completed in " + Duration.between(planStart, Instant.now()).toSeconds() + "s",
+                    plan.summary() + " completed in " + elapsed.toSeconds() + "s",
                     plan.id().toString());
+            persistReflection(plan, TaskState.COMPLETED, steps.size(), steps.size(), elapsed, null);
 
         } catch (Throwable t) {
             log.error("JobSupervisor crashed unexpectedly", t);
@@ -293,7 +298,8 @@ public class JobSupervisor {
             int escalationCount, int maxEscalations,
             BotOperations bot,
             AtomicReference<TaskSnapshot> current,
-            Consumer<TaskSnapshot> onUpdate) {
+            Consumer<TaskSnapshot> onUpdate,
+            Instant planStart) {
 
         // Build world-state snapshot with whatever the bot can tell us cheaply.
         Map<String, Object> worldState = Map.of(
@@ -361,6 +367,8 @@ public class JobSupervisor {
                 String abandonReason = decision.explanation() + " [original: " + reason + "]";
                 markFailed(plan, stepIndex, abandonReason, current, onUpdate);
                 notifyPlayerAndFramework(plan, decision.explanation());
+                Duration elapsed = Duration.between(planStart, Instant.now());
+                persistReflection(plan, TaskState.FAILED, stepIndex, steps.size(), elapsed, abandonReason);
                 yield EscalationOutcome.abort(newEscalationCount);
             }
         };
@@ -610,6 +618,63 @@ public class JobSupervisor {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Generate and persist a Reflexion-pattern postmortem for a completed or failed plan.
+     *
+     * <p>Builds a compact context string from the plan outcome, elapsed time, step
+     * counts, and (if present) the terminal failure reason, then calls the
+     * {@link ReflectionService} for a 2-3 sentence plain-text reflection. The result
+     * is stored as an episodic memory event with importance 7 (success) or 8 (failure)
+     * so future planning turns can surface it via three-factor retrieval.</p>
+     *
+     * <p>All exceptions are caught and logged so a reflection failure never disrupts
+     * the task lifecycle.</p>
+     *
+     * @param plan           the plan that just terminated
+     * @param finalState     {@link TaskState#COMPLETED} or {@link TaskState#FAILED}
+     * @param completedSteps number of steps that finished before the terminal state
+     * @param totalSteps     total steps in the plan
+     * @param elapsed        wall time from plan start to terminal state
+     * @param failureReason  the failure message, or null on COMPLETED
+     */
+    private void persistReflection(Plan plan, TaskState finalState,
+                                    int completedSteps, int totalSteps,
+                                    Duration elapsed, String failureReason) {
+        try {
+            String outcome = finalState == TaskState.COMPLETED ? "SUCCESS" : "FAILED";
+            StringBuilder ctx = new StringBuilder();
+            ctx.append("Task: ").append(plan.summary()).append('\n');
+            ctx.append("Outcome: ").append(outcome).append('\n');
+            ctx.append("Steps completed: ").append(completedSteps).append('/').append(totalSteps).append('\n');
+            ctx.append("Wall time: ").append(elapsed.toMinutes()).append(" minutes (")
+               .append(elapsed.toSeconds()).append("s)").append('\n');
+            if (failureReason != null && !failureReason.isBlank()) {
+                ctx.append("Failure reason: ").append(failureReason).append('\n');
+            }
+
+            String reflection = reflectionService.reflect(ctx.toString());
+
+            int importance = finalState == TaskState.COMPLETED ? 7 : 8;
+            episodicMemoryService.writeWithImportance(
+                    AgentEvent.TYPE_REFLECTION,
+                    reflection,
+                    sessionContext.getSessionId(),
+                    Optional.of(plan.id().toString()),
+                    importance);
+
+            counters.inc("reflection." + (finalState == TaskState.COMPLETED ? "success" : "failure"));
+            runLog.log("reflection_written", Map.of(
+                    "planId", plan.id().toString(),
+                    "outcome", outcome,
+                    "importance", importance));
+
+            log.info("JobSupervisor: reflection written for plan '{}' ({})", plan.summary(), outcome);
+
+        } catch (Exception e) {
+            log.warn("JobSupervisor: reflection failed for plan '{}' — {}", plan.summary(), e.getMessage());
+        }
+    }
 
     private void publishFramework(String message) {
         try {

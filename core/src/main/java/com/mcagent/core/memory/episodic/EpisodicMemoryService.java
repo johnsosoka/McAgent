@@ -24,6 +24,21 @@ public interface EpisodicMemoryService {
     void write(String type, String content, String sessionId, Optional<String> relatedTaskId);
 
     /**
+     * Persist a new event with an explicit importance score, bypassing LLM scoring.
+     *
+     * <p>Use this when the importance is known at call-site (e.g. corrections are always
+     * forced to 9 so they are never under-weighted by the LLM scorer).</p>
+     *
+     * @param type          one of the {@code TYPE_*} constants on {@link AgentEvent}
+     * @param content       free-text description of what happened
+     * @param sessionId     server-address key for session scoping
+     * @param relatedTaskId optional UUID string linking this event to an active plan
+     * @param importance    explicit 1-10 importance; clamped to [1, 10]
+     */
+    void writeWithImportance(String type, String content, String sessionId,
+                             Optional<String> relatedTaskId, int importance);
+
+    /**
      * Retrieve the top-{@code k} events most relevant to the given query context.
      *
      * <p>Events are scored as:

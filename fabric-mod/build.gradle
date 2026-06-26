@@ -130,8 +130,65 @@ shadowJar {
     relocate 'com.ibm.icu', 'com.mcagent.shaded.com.ibm.icu'
     relocate 'org.glassfish', 'com.mcagent.shaded.org.glassfish'
     relocate 'org.eclipse', 'com.mcagent.shaded.org.eclipse'
-    relocate 'com.sun', 'com.mcagent.shaded.com.sun'
 }
+
+tasks.register('validateShadowJar') {
+    dependsOn shadowJar
+    doLast {
+        def jarFile = tasks.shadowJar.archiveFile.get().asFile
+        if (!jarFile.exists()) {
+            throw new GradleException("Shadow JAR not built: ${jarFile}")
+        }
+
+        def forbidden = [
+            'com/fasterxml/jackson',
+            'org/hibernate',
+            'org/springframework',
+            'dev/langchain4j',
+            'org/yaml/snakeyaml',
+            'com/zaxxer',
+            'jakarta/persistence',
+            'org/aspectj',
+            'io/micrometer'
+        ]
+
+        def allowedPrefixes = [
+            'com/mcagent/shaded/',
+            'net/minecraft/',
+            'net/fabricmc/',
+            'org/slf4j/',
+            'org/apache/logging/',
+            'META-INF/'
+        ]
+
+        def violations = []
+        new java.util.zip.ZipFile(jarFile).withCloseable { zip ->
+            zip.entries().each { entry ->
+                if (entry.directory) return
+                def name = entry.name
+                if (allowedPrefixes.any { name.startsWith(it) }) return
+                forbidden.each { f ->
+                    if (name.startsWith(f)) {
+                        violations.add(name)
+                    }
+                }
+            }
+        }
+
+        if (!violations.isEmpty()) {
+            def truncated = violations.take(20).collect { "  - " + it }.join("\n")
+            def more = violations.size() > 20 ? "\n  ... and ${violations.size() - 20} more" : ""
+            throw new GradleException(
+                "Shadow JAR contains ${violations.size()} unshaded entries that match forbidden prefixes:\n${truncated}${more}\n" +
+                "Add the missing 'relocate' rule(s) to fabric-mod/build.gradle."
+            )
+        }
+
+        println "Shadow JAR validation passed: no unshaded entries from forbidden prefixes."
+    }
+}
+
+build.dependsOn validateShadowJar
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'

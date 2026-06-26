@@ -4,6 +4,36 @@
 
 ---
 
+## 2026-06-25 — Session: Sprint 15 — Memory & Polish
+
+**Branch:** `feature/sprint-15-memory` (off Sprint 14)
+**Tests:** 528 total, 0 failures (+42 from Sprint 14)
+
+### What we shipped
+
+- **Q2 — Episodic memory.** `AgentEvent` JPA entity + `EpisodicMemoryService`. Generative-Agents three-factor retrieval (relevance via cosine embedding sim + recency exp-decay over 8h + importance 1-10). LLM-scored importance at write time, fallback default 5. Top-3 retrieved before each `Assistant.chat` and injected as `<memories>` framework. Write hooks: every player command, every `plan_complete` / `plan_fail`.
+- **Q4 — Correction memory.** `rememberCorrection(player, context, wrong, correct)` `@Tool` stores with importance=9 (bypasses LLM scoring). `<correction_guidance>` in Assistant system prompt teaches the LLM when to call it.
+- **P11 — End-of-task reflection.** `ReflectionService` AI-Service. `JobSupervisor.persistReflection` called on COMPLETED (importance=7) and FAILED (importance=8); skipped on CANCELLED. Wrapped in try/catch so reflection failure doesn't break lifecycle.
+- **P5 — Shadow JAR CI validation.** New `validateShadowJar` Gradle task scans the final JAR for forbidden unshaded prefixes (`com.fasterxml.jackson`, `org.hibernate`, `org.springframework`, `dev.langchain4j`, `jakarta.persistence`, etc.) and fails the build cleanly. Removed the dangerous `com.sun` relocation that was rewriting JDK internals.
+
+### Deferred
+
+- **P7 — Mod menu HUD panel.** UX stretch; not blocking. Sprint 16+ if there's appetite.
+
+### Final test count across all sprints
+
+- Sprint 11 baseline: 172 tests.
+- Sprint 12: 262 tests (+90).
+- Sprint 13: 409 tests (+147).
+- Sprint 14: 486 tests (+77).
+- Sprint 15: 528 tests (+42).
+
+### What's next
+
+Hand all 5 e2e validation guides to John. Begin in-game validation cycle. Issue #10 PR still needs merge; rebase sprint branches onto main once that lands.
+
+---
+
 ## 2026-06-25 — Session: Sprint 14 — Autonomy & Routines
 
 **Branch:** `feature/sprint-14-autonomy` (off Sprint 13)
