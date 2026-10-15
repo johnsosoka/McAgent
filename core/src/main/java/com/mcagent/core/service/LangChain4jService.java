@@ -38,7 +38,9 @@ public class LangChain4jService {
         log.debug("Processing input from {}: {}", playerId, playerMessage);
         try {
             injectPlayerContext(playerId);
-            return assistant.chat(playerMessage);
+            synchronized (chatMemory) {
+                return assistant.chat(playerMessage);
+            }
         } catch (Exception e) {
             log.error("LLM processing failed", e);
             return null;
@@ -56,7 +58,32 @@ public class LangChain4jService {
     public void addFrameworkContext(String message) {
         String tagged = "<framework>" + message + "</framework>";
         log.debug("Injecting framework context: {}", tagged);
-        chatMemory.add(UserMessage.from(tagged));
+        synchronized (chatMemory) {
+            chatMemory.add(UserMessage.from(tagged));
+        }
+    }
+
+    /**
+     * Process an urgent autonomous observation by injecting framework context
+     * and immediately calling the LLM without waiting for player input.
+     * Used in active observation mode when threats or opportunities are detected.
+     *
+     * @param observation the autonomous observation text
+     * @return the LLM's response, or null on error
+     */
+    public String processUrgentObservation(String observation) {
+        log.debug("Processing urgent observation: {}", observation);
+        try {
+            addFrameworkContext(observation);
+            synchronized (chatMemory) {
+                // The observation is already in memory as a framework message.
+                // The synthetic prompt nudges the model to react without waiting for player input.
+                return assistant.chat("Autonomous observation: " + observation);
+            }
+        } catch (Exception e) {
+            log.error("Urgent observation processing failed", e);
+            return null;
+        }
     }
 
     private void injectPlayerContext(String playerId) {
@@ -65,6 +92,8 @@ public class LangChain4jService {
                 .map(loc -> "<player_context>Current player: " + playerId + " at " + loc + "</player_context>")
                 .orElse("<player_context>Current player: " + playerId + " (position unknown — may be out of range)</player_context>");
         log.debug("Injecting player context: {}", context);
-        chatMemory.add(UserMessage.from(context));
+        synchronized (chatMemory) {
+            chatMemory.add(UserMessage.from(context));
+        }
     }
 }

@@ -28,7 +28,6 @@ import com.mcagent.core.model.PlayerInfo;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.BotOperations.Location;
 import com.mcagent.fabric.queue.ClientThreadExecutor;
-import lombok.extern.slf4j.Slf4j;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -48,14 +47,18 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Baritone-backed implementation of {@link BotOperations} for Fabric 26.1.2.
  * Bridges core business logic to the Baritone pathfinding engine.
  *
  * <p>Compatible with Baritone v1.15.0+ API (Mojmap for MC 26.1.2).</p>
  */
-@Slf4j
 public class FabricBaritoneBridge implements BotOperations {
+
+    private static final Logger log = LoggerFactory.getLogger(FabricBaritoneBridge.class);
 
     private static final Map<String, Block> BLOCK_MAP = Map.ofEntries(
             Map.entry("DIAMOND_ORE", Blocks.DIAMOND_ORE),

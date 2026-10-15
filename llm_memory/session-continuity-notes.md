@@ -1,17 +1,17 @@
 # McAgent — Session Continuity Notes
 
-**Date:** 2026-05-26
-**Branch:** `main`
-**Status:** Sprint #8 complete — building & placement merged to main, validated in-game
+**Date:** 2026-05-27
+**Branch:** `feature/issue-10-background-observation-loop`
+**Status:** Sprint #10 complete — background observation loop implemented, all tests passing
 
 ---
 
 ## Current State
 
-Issues #3–#7 are all **merged to main**:
-- #3 Message Queuing, #4 Player/Entity Scanning, #5 Advanced Pathing, #6 Safety/Health, #7 Inventory Queries
+Issues #3–#10 are all **implemented**:
+- #3 Message Queuing, #4 Player/Entity Scanning, #5 Advanced Pathing, #6 Safety/Health, #7 Inventory Queries, #8 Building/Placement, #10 Background Observation Loop
 
-### What Works (validated in-game)
+### What Works (validated in-game unless marked)
 - ✅ Message queuing (`BotEventQueue`) with priority scheduling
 - ✅ Framework throttling & deduplication (`FrameworkMessageBuffer`)
 - ✅ Thread safety via `ClientThreadExecutor`
@@ -30,7 +30,14 @@ Issues #3–#7 are all **merged to main**:
 - ✅ Inventory queries: hasItem, countItem, getInventorySummary (validated in-game)
 - ✅ Building primitives: buildArea, placeBlockAt (validated in-game — platform built successfully)
 - ✅ Material verification before builds
-- ✅ All tests passing (48)
+- ✅ **Background observation loop** (`AutonomousObserver`) with tick-based scanning
+- ✅ **Threat detection** (hostile mobs) and **opportunity detection** (passive mobs)
+- ✅ **Debounce** by spatial bucket (4-block) + time window
+- ✅ **Passive mode**: observations published as `<framework>` messages to `BotEventQueue`
+- ✅ **Active mode**: observations trigger immediate LLM calls via `triggerUrgentFramework()` on urgent dispatcher thread
+- ✅ **Player toggle commands**: `agent watch`, `agent stop watching`, `agent passive mode`, `agent active mode`
+- ✅ **Configurable** via `BotProperties.ObservationProperties`
+- ✅ All tests passing (59 — 48 core + 11 fabric-mod observer)
 - ✅ Shadow JAR builds successfully
 
 ### Open Issues (backlog)
@@ -41,17 +48,61 @@ Issues #3–#7 are all **merged to main**:
 | #6 | Safety Mode & Health Monitoring | **Merged** | — |
 | #7 | Inventory Queries | **Merged** | None |
 | #8 | Building / Placement | **Merged** | None |
-| #10 | Background Observation Loop | Next sprint | Needs #5–#8 capabilities — now unblocked |
+| #10 | Background Observation Loop | **In Review** | None |
 
-### Architecture Decisions (unchanged)
+### Architecture Decisions
 - Tool-based architecture: `Assistant.chat()` returns `String`, LangChain4j auto-discovers `@Tool` methods
 - `BotOperations` interface remains synchronous; thread safety enforced at `FabricBaritoneBridge` implementation layer
 - `FabricChatSender` is the final rate-limited, thread-safe chat transport
 - Memory backpressure: `max-history: 20` in `application.yml`
+- **NEW:** `AutonomousObserver` runs on the client thread, reads `BotOperations`, publishes to `BotEventQueue`
+- **NEW:** `BotEventQueue` maintains a separate `urgentDispatcher` thread for active-mode LLM invocation, preventing blocking of player commands
+- **NEW:** `LangChain4jService.processUrgentObservation()` injects framework context and calls `assistant.chat()` without player context injection
+- **NEW:** Debounce uses 4-block spatial bucketing (`type:bucketX:bucketZ`) so moving mobs re-trigger, but stationary ones don't spam
 
 ---
 
 ## Completed Sprints
+
+### Issue #10 — Background Observation Loop (in review)
+**Branch:** `feature/issue-10-background-observation-loop`
+
+### Goals
+- `AutonomousObserver` — tick-based world scanning for threats and opportunities
+- Configurable scan interval, threat radius, passive mob radius
+- Debounce logic (spatial + temporal) to prevent spam
+- Passive mode: observations as `<framework>` messages in chat memory
+- Active mode: urgent LLM calls that can trigger tools like `fleeFrom()` or `setSafetyMode(true)`
+- Player chat toggle commands: `watch`, `stop watching`, `passive mode`, `active mode`
+
+### Interface Targets
+**BotProperties.java:**
+```java
+ObservationProperties observation = new ObservationProperties();
+// enabled, scanIntervalTicks, threatRadius, passiveRadius,
+// mode (passive/active), messageMode (individual/summary),
+// debounceSeconds, trackPassiveMobs, passiveMobTypes
+```
+
+**BotEventQueue.java:**
+```java
+void triggerUrgentFramework(String message);
+```
+
+**LangChain4jService.java:**
+```java
+String processUrgentObservation(String observation);
+```
+
+**AutonomousObserver.java:**
+```java
+void onTick();
+void setEnabled(boolean enabled);
+void setMode(String mode);
+void setMessageMode(String messageMode);
+```
+
+---
 
 ### Issue #8 — Building / Placement (merged)
 **PR:** #14

@@ -2,10 +2,12 @@ package com.mcagent.fabric.queue;
 
 import com.mcagent.core.service.LangChain4jService;
 import com.mcagent.fabric.FabricChatSender;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.Comparator;
 import java.util.concurrent.*;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Central event coordinator for the fabric-mod layer.
@@ -21,8 +23,9 @@ import java.util.concurrent.*;
  * Tool calls that touch Baritone are dispatched back to the client thread via
  * {@link ClientThreadExecutor}.</p>
  */
-@Slf4j
 public class BotEventQueue {
+    private static final Logger log = LoggerFactory.getLogger(BotEventQueue.class);
+
 
     private static final int INBOUND_CAPACITY = 8;
     private static final int OUTBOUND_CAPACITY = 4;
@@ -35,6 +38,7 @@ public class BotEventQueue {
 
     private final ExecutorService inboundDispatcher;
     private final ScheduledExecutorService outboundDrainer;
+    private final ExecutorService urgentDispatcher;
 
     private LangChain4jService langChainService;
     private volatile boolean running;
@@ -50,6 +54,11 @@ public class BotEventQueue {
         });
         this.outboundDrainer = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "mc-agent-outbound-drainer");
+            t.setDaemon(true);
+            return t;
+        });
+        this.urgentDispatcher = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "mc-agent-urgent-dispatcher");
             t.setDaemon(true);
             return t;
         });
@@ -132,12 +141,35 @@ public class BotEventQueue {
     }
 
     /**
+     * Trigger immediate LLM processing of a framework observation.
+     * Used in active observation mode to let the bot react to threats
+     * or opportunities without waiting for player input.
+     */
+    public void triggerUrgentFramework(String message) {
+        if (!running) {
+            log.warn("Queue not running; dropping urgent framework message");
+            return;
+        }
+        urgentDispatcher.submit(() -> {
+            try {
+                String response = langChainService.processUrgentObservation(message);
+                if (response != null && !response.isBlank()) {
+                    enqueueOutbound(response);
+                }
+            } catch (Exception e) {
+                log.error("Error processing urgent framework message", e);
+            }
+        });
+    }
+
+    /**
      * Shut down all background threads and flush pending framework messages.
      */
     public void shutdown() {
         running = false;
         inboundDispatcher.shutdownNow();
         outboundDrainer.shutdownNow();
+        urgentDispatcher.shutdownNow();
         frameworkBuffer.flush();
         frameworkBuffer.shutdown();
         log.info("BotEventQueue shut down.");

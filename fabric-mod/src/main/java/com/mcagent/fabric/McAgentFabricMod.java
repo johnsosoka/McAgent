@@ -1,10 +1,12 @@
 package com.mcagent.fabric;
 
 import com.mcagent.core.CoreApplication;
+import com.mcagent.core.config.BotProperties;
 import com.mcagent.core.config.EnvLoader;
 import com.mcagent.core.service.BotOperations;
 import com.mcagent.core.service.ChatService;
 import com.mcagent.core.service.LangChain4jService;
+import com.mcagent.fabric.observer.AutonomousObserver;
 import com.mcagent.fabric.queue.BotEventQueue;
 import com.mcagent.fabric.queue.FrameworkMessageBuffer;
 import net.fabricmc.api.ClientModInitializer;
@@ -30,6 +32,7 @@ public class McAgentFabricMod implements ClientModInitializer {
     private AnnotationConfigApplicationContext springContext;
     private FabricChatHandler chatHandler;
     private FabricBaritoneBridge baritoneBridge;
+    private AutonomousObserver autonomousObserver;
     private ClientPacketListener lastConnection;
     private BotEventQueue botEventQueue;
     private FrameworkMessageBuffer frameworkBuffer;
@@ -80,6 +83,10 @@ public class McAgentFabricMod implements ClientModInitializer {
         if (baritoneBridge != null) {
             baritoneBridge.onClientTick();
         }
+
+        if (autonomousObserver != null) {
+            autonomousObserver.onTick();
+        }
     }
 
     private void initSpringContext() {
@@ -129,7 +136,10 @@ public class McAgentFabricMod implements ClientModInitializer {
             // Wire ChatService so the LLM's sendMessage tool posts to the outbound queue
             chatService.setSender(botEventQueue::enqueueOutbound);
 
-            chatHandler = new FabricChatHandler(botEventQueue);
+            BotProperties botProperties = springContext.getBean(BotProperties.class);
+            autonomousObserver = new AutonomousObserver(botOps, botEventQueue, botProperties.getObservation());
+
+            chatHandler = new FabricChatHandler(botEventQueue, autonomousObserver);
             botEventQueue.start(langChainService);
 
             LOGGER.info("McAgent initialized successfully. Beans: {}",
@@ -158,6 +168,7 @@ public class McAgentFabricMod implements ClientModInitializer {
             springContext.close();
             springContext = null;
         }
+        autonomousObserver = null;
         baritoneBridge = null;
         disconnectTicks = 0;
         LOGGER.info("McAgent Spring context shut down.");
